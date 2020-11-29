@@ -1005,6 +1005,10 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
     extract.setKeepOrganized(true);
     plane_seg.setIndices(extract.getRemovedIndices());
 
+    // remove the plane from the original pc
+    extract.setNegative(true);
+    extract.filter(*pc_copy);
+
     // check the height
     double height = this->averageZ(plane.points);
     if (height >= zone.getZMin() && height <= zone.getZMax())
