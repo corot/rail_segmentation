@@ -40,6 +40,7 @@
 
 // PCL
 #include <pcl/common/common.h>
+#include <pcl/features/normal_3d_omp.h>
 #include <pcl/filters/conditional_removal.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/passthrough.h>
@@ -51,6 +52,7 @@
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/segmentation/region_growing_rgb.h>
 #include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/sample_consensus/sac_model_normal_plane.h>
 
 
 // YAML
@@ -87,8 +89,10 @@ public:
     static constexpr double SAC_DISTANCE_THRESHOLD = 0.01;
     /*! The maximum interations for the plane segmenter */
     static constexpr int SAC_MAX_ITERATIONS = 100;
+    /*! The minimum surface size. */
+    static constexpr int DEFAULT_MIN_SURFACE_SIZE = 10000;
     /*! The padding for surface removal. */
-    static constexpr double SURFACE_REMOVAL_PADDING = 0.005;
+    static constexpr double SURFACE_REMOVAL_PADDING = 0.002;
     /*! The minimum cluster size. */
     static constexpr int DEFAULT_MIN_CLUSTER_SIZE = 200;
     /*! The maximum cluster size. */
@@ -344,7 +348,7 @@ private:
     /*! The debug, okay check, and color segmentation flags. */
     bool debug_, okay_, use_color_;
     /*! Cluster parameters. */
-    int min_cluster_size_, max_cluster_size_;
+    int min_surface_size_, min_cluster_size_, max_cluster_size_;
     /*! Mutex for locking on the point cloud and current messages. */
     boost::mutex msg_mutex_;
     /*! List of segmentation zones. */
@@ -361,7 +365,7 @@ private:
     /*! Services advertised by this node */
     ros::ServiceServer segment_srv_, segment_objects_srv_, segment_objects_from_point_cloud_srv_, clear_srv_, remove_object_srv_, calculate_features_srv_;
     /*! Publishers used in the node. */
-    ros::Publisher segmented_objects_pub_, table_pub_, markers_pub_, table_marker_pub_, debug_pc_pub_, debug_img_pub_;
+    ros::Publisher segmented_objects_pub_, table_pub_, markers_pub_, table_marker_pub_, debug_pc1_pub_, debug_pc2_pub_, debug_pc3_pub_, debug_img_pub_;
     /*! Subscribers used in the node. */
 //  ros::Subscriber point_cloud_sub_;
     /*! Main transform listener. */

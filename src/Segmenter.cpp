@@ -18,12 +18,14 @@ using namespace rail::segmentation;
 
 //constant definitions (to use in functions with reference parameters, e.g. param())
 #if __cplusplus >= 201103L
-  constexpr bool Segmenter::DEFAULT_DEBUG;
-  constexpr int Segmenter::DEFAULT_MIN_CLUSTER_SIZE;
-  constexpr int Segmenter::DEFAULT_MAX_CLUSTER_SIZE;
-  constexpr double Segmenter::CLUSTER_TOLERANCE;
+constexpr bool Segmenter::DEFAULT_DEBUG;
+constexpr int Segmenter::DEFAULT_MIN_SURFACE_SIZE;
+constexpr int Segmenter::DEFAULT_MIN_CLUSTER_SIZE;
+constexpr int Segmenter::DEFAULT_MAX_CLUSTER_SIZE;
+constexpr double Segmenter::CLUSTER_TOLERANCE;
 #else
-  const bool Segmenter::DEFAULT_DEBUG;
+const bool Segmenter::DEFAULT_DEBUG;
+  const int Segmenter::DEFAULT_MIN_SURFACE_SIZE;
   const int Segmenter::DEFAULT_MIN_CLUSTER_SIZE;
   const int Segmenter::DEFAULT_MAX_CLUSTER_SIZE;
   const double Segmenter::CLUSTER_TOLERANCE;
@@ -39,7 +41,8 @@ Segmenter::Segmenter() : private_node_("~"), tf2_(tf_buffer_)
 
   // grab any parameters we need
   private_node_.param("debug", debug_, DEFAULT_DEBUG);
-  private_node_.param("min_cluster_size", min_cluster_size_, DEFAULT_MIN_CLUSTER_SIZE);
+  private_node_.param("min_surface_size", min_surface_size_, DEFAULT_MIN_SURFACE_SIZE);
+  private_node_.param("min_cluster_size", min_cluster_size_, DEFAULT_MIN_SURFACE_SIZE);
   private_node_.param("max_cluster_size", max_cluster_size_, DEFAULT_MAX_CLUSTER_SIZE);
   private_node_.param("cluster_tolerance", cluster_tolerance_, CLUSTER_TOLERANCE);
   private_node_.param("use_color", use_color_, false);
@@ -57,17 +60,19 @@ Segmenter::Segmenter() : private_node_("~"), tf2_(tf_buffer_)
   calculate_features_srv_ = private_node_.advertiseService("calculate_features", &Segmenter::calculateFeaturesCallback,
                                                            this);
   segmented_objects_pub_ = private_node_.advertise<rail_manipulation_msgs::SegmentedObjectList>(
-      "segmented_objects", 1, true
+    "segmented_objects", 1
   );
   table_pub_ = private_node_.advertise<rail_manipulation_msgs::SegmentedObject>(
-      "segmented_table", 1, true
+    "segmented_table", 1
   );
   markers_pub_ = private_node_.advertise<visualization_msgs::MarkerArray>("markers", 1, true);
   table_marker_pub_ = private_node_.advertise<visualization_msgs::Marker>("table_marker", 1, true);
   // setup a debug publisher if we need it
   if (debug_)
   {
-    debug_pc_pub_ = private_node_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >("debug_pc", 1, true);
+    debug_pc1_pub_ = private_node_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >("debug_pc1", 1, true);
+    debug_pc2_pub_ = private_node_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >("debug_pc2", 1, true);
+    debug_pc3_pub_ = private_node_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >("debug_pc3", 1, true);
     debug_img_pub_ = private_node_.advertise<sensor_msgs::Image>("debug_img", 1, true);
   }
 
@@ -293,7 +298,7 @@ const SegmentationZone &Segmenter::getCurrentZone() const
 
     // check if all the bounds meet
     if (roll >= zones_[i].getRollMin() && pitch >= zones_[i].getPitchMin() && yaw >= zones_[i].getYawMin() &&
-        roll <= zones_[i].getRollMax() && pitch <= zones_[i].getPitchMax() && yaw <= zones_[i].getYawMax())
+      roll <= zones_[i].getRollMax() && pitch <= zones_[i].getPitchMax() && yaw <= zones_[i].getYawMax())
     {
       return zones_[i];
     }
@@ -304,7 +309,7 @@ const SegmentationZone &Segmenter::getCurrentZone() const
 }
 
 bool Segmenter::removeObjectCallback(rail_segmentation::RemoveObject::Request &req,
-    rail_segmentation::RemoveObject::Response &res)
+                                     rail_segmentation::RemoveObject::Response &res)
 {
   // lock for the messages
   boost::mutex::scoped_lock lock(msg_mutex_);
@@ -383,10 +388,10 @@ bool Segmenter::clearCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Re
     marker_list.markers.reserve(markers_.markers.size() + text_markers_.markers.size());
     marker_list.markers.insert(marker_list.markers.end(), markers_.markers.begin(), markers_.markers.end());
     marker_list.markers.insert(marker_list.markers.end(), text_markers_.markers.begin(), text_markers_.markers.end());
-    markers_pub_.publish(marker_list);
+//    markers_pub_.publish(marker_list);
   } else
   {
-    markers_pub_.publish(markers_);
+    //  markers_pub_.publish(markers_);
   }
 
   markers_.markers.clear();
@@ -397,7 +402,7 @@ bool Segmenter::clearCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Re
   }
 
   table_marker_.action = visualization_msgs::Marker::DELETE;
-  table_marker_pub_.publish(table_marker_);
+/// table_marker_pub_.publish(table_marker_);
   return true;
 }
 
@@ -408,7 +413,7 @@ bool Segmenter::segmentCallback(std_srvs::Empty::Request &req, std_srvs::Empty::
 }
 
 bool Segmenter::segmentObjectsCallback(rail_manipulation_msgs::SegmentObjects::Request &req,
-    rail_manipulation_msgs::SegmentObjects::Response &res)
+                                       rail_manipulation_msgs::SegmentObjects::Response &res)
 {
   return segmentObjects(res.segmented_objects);
 }
@@ -433,8 +438,8 @@ bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &obje
   while (point_cloud_time < request_time)
   {
     pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr pc_msg =
-        ros::topic::waitForMessage<pcl::PointCloud<pcl::PointXYZRGB> >(point_cloud_topic_, node_,
-                                                                       ros::Duration(10.0));
+      ros::topic::waitForMessage<pcl::PointCloud<pcl::PointXYZRGB> >(point_cloud_topic_, node_,
+                                                                     ros::Duration(10.0));
     if (pc_msg == NULL)
     {
       ROS_INFO("No point cloud received for segmentation.");
@@ -447,11 +452,14 @@ bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &obje
     point_cloud_time = pcl_conversions::fromPCL(pc->header.stamp);
   }
 
-  return executeSegmentation(pc, objects);
+  ros::WallTime t0 = ros::WallTime::now();
+  bool kk= executeSegmentation(pc, objects);
+  printf("%f\n", (ros::WallTime::now() - t0).toSec());
+  return kk;
 }
 
 bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
-    rail_manipulation_msgs::SegmentedObjectList &objects)
+                                    rail_manipulation_msgs::SegmentedObjectList &objects)
 {
   // clear the objects first
   std_srvs::Empty empty;
@@ -463,6 +471,13 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
 
   // transform the point cloud to the fixed frame
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
+
+
+  ROS_INFO("%d", pc->size());
+  std::vector<int> mapped;
+  pcl::removeNaNFromPointCloud<pcl::PointXYZRGB>(*pc, *transformed_pc, mapped);
+
+  ROS_INFO("%d  %d", transformed_pc->size(), mapped.size());
   pcl_ros::transformPointCloud(zone.getBoundingFrameID(), ros::Time(0), *pc, pc->header.frame_id,
                                *transformed_pc, tf_);
   transformed_pc->header.frame_id = zone.getBoundingFrameID();
@@ -501,42 +516,51 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
   if (z_min > -numeric_limits<double>::infinity())
   {
     bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-        new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::LE, z_min))
+      new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::LE, z_min))
     );
   }
   if (zone.getZMax() < numeric_limits<double>::infinity())
   {
     bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-        new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::GE, zone.getZMax()))
+      new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::GE, zone.getZMax()))
     );
   }
   if (zone.getYMin() > -numeric_limits<double>::infinity())
   {
     bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-        new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::LE, zone.getYMin()))
+      new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::LE, zone.getYMin()))
     );
   }
   if (zone.getYMax() < numeric_limits<double>::infinity())
   {
     bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-        new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::GE, zone.getYMax()))
+      new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::GE, zone.getYMax()))
     );
   }
   if (zone.getXMin() > -numeric_limits<double>::infinity())
   {
     bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-        new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::LE, zone.getXMin()))
+      new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::LE, zone.getXMin()))
     );
   }
   if (zone.getXMax() < numeric_limits<double>::infinity())
   {
     bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-        new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::GE, zone.getXMax()))
+      new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::GE, zone.getXMax()))
     );
   }
 
+  //ROS_INFO("%d", filter_indices->size());
   // remove past the given bounds
   this->inverseBound(transformed_pc, filter_indices, bounds, filter_indices);
+
+  //ROS_INFO("%d", filter_indices->size());
+  //ROS_INFO("%d", transformed_pc->size());
+  ////pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
+  this->extract(transformed_pc, filter_indices, transformed_pc);
+
+  //ROS_INFO("%d", transformed_pc->size());
+  debug_pc1_pub_.publish(transformed_pc);
 
   if (crop_first_)
   {
@@ -555,7 +579,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
 
       pcl::ConditionOr<pcl::PointXYZRGB>::Ptr table_bounds(new pcl::ConditionOr<pcl::PointXYZRGB>);
       table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-          new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::LE, z_min))
+        new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::LE, z_min))
       );
 
       // plane segmentation does adds back in the filtered indices, so we need to re-add the old bounds (this should
@@ -564,31 +588,31 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
       if (zone.getZMax() < numeric_limits<double>::infinity())
       {
         table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::GE, zone.getZMax()))
+          new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::GE, zone.getZMax()))
         );
       }
       if (zone.getYMin() > -numeric_limits<double>::infinity())
       {
         table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::LE, zone.getYMin()))
+          new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::LE, zone.getYMin()))
         );
       }
       if (zone.getYMax() < numeric_limits<double>::infinity())
       {
         table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::GE, zone.getYMax()))
+          new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::GE, zone.getYMax()))
         );
       }
       if (zone.getXMin() > -numeric_limits<double>::infinity())
       {
         table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::LE, zone.getXMin()))
+          new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::LE, zone.getXMin()))
         );
       }
       if (zone.getXMax() < numeric_limits<double>::infinity())
       {
         table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::GE, zone.getXMax()))
+          new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::GE, zone.getXMax()))
         );
       }
 
@@ -602,8 +626,24 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
   {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
     this->extract(transformed_pc, filter_indices, debug_pc);
-    debug_pc_pub_.publish(debug_pc);
+    debug_pc2_pub_.publish(debug_pc);
   }
+
+
+  // add to the markers
+  table_marker_ = table_.marker;
+
+  // publish the new list
+  table_pub_.publish(table_);
+
+  // publish the new marker array
+  table_marker_pub_.publish(table_marker_);
+
+  objects.objects.push_back(table_);
+/////  return true;  // TODO table only,  and add as segmented object to avoid the pain of the subscriber
+
+
+
 
   // extract clusters
   vector<pcl::PointIndices> clusters;
@@ -822,26 +862,27 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
     {
       markers_pub_.publish(markers_);
     }
-
-    // add to the markers
-    table_marker_ = table_.marker;
-
-    // publish the new list
-    table_pub_.publish(table_);
-
-    // publish the new marker array
-    table_marker_pub_.publish(table_marker_);
-
   } else
   {
     ROS_WARN("No segmented objects found.");
   }
 
+  // publish the table, even if found no segmented objects
+
+  // add to the markers
+  table_marker_ = table_.marker;
+
+  // publish the new list
+  table_pub_.publish(table_);
+
+  // publish the new marker array
+  table_marker_pub_.publish(table_marker_);
+
   return true;
 }
 
 bool Segmenter::calculateFeaturesCallback(rail_manipulation_msgs::ProcessSegmentedObjects::Request &req,
-    rail_manipulation_msgs::ProcessSegmentedObjects::Response &res)
+                                          rail_manipulation_msgs::ProcessSegmentedObjects::Response &res)
 {
   res.segmented_objects.header = req.segmented_objects.header;
   res.segmented_objects.cleared = req.segmented_objects.cleared;
@@ -895,7 +936,7 @@ bool Segmenter::calculateFeaturesCallback(rail_manipulation_msgs::ProcessSegment
 
     // calculate the minimum volume bounding box (assuming the object is resting on a flat surface)
     res.segmented_objects.objects[i].bounding_volume =
-        BoundingVolumeCalculator::computeBoundingVolume(res.segmented_objects.objects[i].point_cloud);
+      BoundingVolumeCalculator::computeBoundingVolume(res.segmented_objects.objects[i].point_cloud);
 
     // calculate the axis-aligned bounding box
     Eigen::Vector4f min_pt, max_pt;
@@ -956,44 +997,94 @@ bool Segmenter::calculateFeaturesCallback(rail_manipulation_msgs::ProcessSegment
   return true;
 }
 
-bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
-    const pcl::IndicesConstPtr &indices_in, const SegmentationZone &zone, const pcl::IndicesPtr &indices_out,
-    rail_manipulation_msgs::SegmentedObject &table_out) const
+/*
+void getPlaneTransform(const cv::Vec4f& plane_coefficients, cv::Matx33f& rotation, cv::Vec3f& translation)
 {
+  double a = plane_coefficients[0], b = plane_coefficients[1], c = plane_coefficients[2], d = plane_coefficients[3];
+  // assume plane coefficients are normalized
+  translation = cv::Vec3f(-a * d, -b * d, -c * d);
+  cv::Vec3f z(a, b, c);
+
+  //try to align the x axis with the x axis of the original frame
+  //or the y axis if z and x are too close too each other
+  cv::Vec3f x(1, 0, 0);
+  if (fabs(z.dot(x)) > 1.0 - 1.0e-4)
+    x = cv::Vec3f(0, 1, 0);
+  cv::Vec3f y = z.cross(x);
+  x = y.cross(z);
+  x = x / norm(x);
+  y = y / norm(y);
+
+  rotation = cv::Matx33f(x[0], y[0], z[0], x[1], y[1], z[1], x[2], y[2], z[2]);
+};
+*/
+bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
+                            const pcl::IndicesConstPtr &indices_in, const SegmentationZone &zone, const pcl::IndicesPtr &indices_out,
+                            rail_manipulation_msgs::SegmentedObject &table_out) const
+{
+
   // use a plane (SAC) segmenter
-  pcl::SACSegmentation<pcl::PointXYZRGB> plane_seg;
-  // set the segmenation parameters
+//  pcl::SACSegmentation<pcl::PointXYZRGB> plane_seg;
+//  // set the segmenation parameters
+//  plane_seg.setOptimizeCoefficients(true);
+//  plane_seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);   // try SACMODEL_NORMAL_PLANE if ko   need pcl::SACSegmentationFromNormals
+//  plane_seg.setAxis(Eigen::Vector3f(0, 0, 1));
+//  plane_seg.setEpsAngle(SAC_EPS_ANGLE  /2.0);  // 4.3 deg
+//  plane_seg.setMethodType(pcl::SAC_RANSAC);
+//  plane_seg.setMaxIterations(SAC_MAX_ITERATIONS   *100);
+//  plane_seg.setDistanceThreshold(SAC_DISTANCE_THRESHOLD);  // 1 cm
+
+//  ROS_WARN("norm1");
+  pcl::NormalEstimationOMP<pcl::PointXYZRGB, pcl::Normal> norm_est;
+  pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
+  norm_est.setSearchMethod(tree);
+  norm_est.setKSearch(50);
+//  ROS_WARN("norm2");
+
+  pcl::SACSegmentationFromNormals<pcl::PointXYZRGB, pcl::Normal> plane_seg;
+  plane_seg.setNormalDistanceWeight(0.1);
   plane_seg.setOptimizeCoefficients(true);
-  plane_seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
+  plane_seg.setModelType(pcl::SACMODEL_NORMAL_PARALLEL_PLANE);
   plane_seg.setAxis(Eigen::Vector3f(0, 0, 1));
   plane_seg.setEpsAngle(SAC_EPS_ANGLE);
   plane_seg.setMethodType(pcl::SAC_RANSAC);
-  plane_seg.setMaxIterations(SAC_MAX_ITERATIONS);
+  plane_seg.setProbability(0.99);
   plane_seg.setDistanceThreshold(SAC_DISTANCE_THRESHOLD);
+  plane_seg.setMaxIterations(SAC_MAX_ITERATIONS);
 
   // create a copy to work with
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_copy(new pcl::PointCloud<pcl::PointXYZRGB>(*in));
+  pcl::PointCloud<pcl::Normal>::Ptr pc_normals(new pcl::PointCloud<pcl::Normal>);
+
+  norm_est.setInputCloud(pc_copy);
+  //norm_est.setIndices(indices_in);
+  norm_est.compute(*pc_normals);
+
+//  ROS_WARN("norm3");
   plane_seg.setInputCloud(pc_copy);
-  plane_seg.setIndices(indices_in);
+  plane_seg.setInputNormals(pc_normals);
+  //plane_seg.setIndices(indices_in);
 
   // Check point height -- if the plane is too low or high, extract another
   while (true)
   {
     // points included in the plane (surface)
     pcl::PointIndices::Ptr inliers_ptr(new pcl::PointIndices);
-
+ //   ROS_WARN("seg");
     // segment the the current cloud
     pcl::ModelCoefficients coefficients;
     plane_seg.segment(*inliers_ptr, coefficients);
 
     // check if we found a surface
-    if (inliers_ptr->indices.size() == 0)
+    if (inliers_ptr->indices.size() < min_surface_size_)
     {
-      ROS_WARN("Could not find a surface above %fm and below %fm.", zone.getZMin(), zone.getZMax());
-      *indices_out = *indices_in;
+      ROS_WARN("Could not find a surface above %fm and below %fm with more than %d point (biggest has %lu).",
+               zone.getZMin(), zone.getZMax(), min_surface_size_, inliers_ptr->indices.size());
+      //// *indices_out = *indices_in;
       table_out.centroid.z = -numeric_limits<double>::infinity();
       return false;
     }
+    ROS_WARN_STREAM("plane found   "<< inliers_ptr->indices.size() <<   "     " <<pc_copy->size());
 
     // remove the plane
     pcl::PointCloud<pcl::PointXYZRGB> plane;
@@ -1002,12 +1093,23 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
     extract.setIndices(inliers_ptr);
     extract.setNegative(false);
     extract.filter(plane);
-    extract.setKeepOrganized(true);
+
+    extract.setKeepOrganized(true);  // otherwise replaces the removed points with NaN   Can't use 2D indexing with a unorganized point clou
+   // ROS_WARN("setIndices");
+
+    //////this->extract(pc_copy, std::static_pointer_cast<const pcl::IndicesConstPtr>(inliers_ptr), pc_copy);
     plane_seg.setIndices(extract.getRemovedIndices());
 
-    // remove the plane from the original pc
-    extract.setNegative(true);
-    extract.filter(*pc_copy);
+  //  ROS_WARN_STREAM("avg z  " << this->averageZ(plane.points) << "     " <<pc_copy->size() << "     " <<extract.getRemovedIndices()->size());
+
+    // Create the filtering object
+//    extract.setNegative(true);
+//    extract.filter(*pc_copy);
+    /////cloud_filtered.swap (cloud_f);
+    ///   plane_seg.setInputCloud(pc_copy);  //TRY TO REMOVE  TODO
+//    plane_seg.setIndices(extract.getRemovedIndices());
+
+  //  ROS_WARN_STREAM("NORM     " <<pc_copy->size());
 
     // check the height
     double height = this->averageZ(plane.points);
@@ -1033,6 +1135,10 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
         pcl::toPCLPointCloud2(plane, *converted);
       }
 
+      //  pcl::fromROSMsg(table_.point_cloud, *debug_pc);
+      // this->extract(transformed_pc, filter_indices, debug_pc);
+      debug_pc3_pub_.publish(plane);
+
       // convert to a SegmentedObject message
       table_out.recognized = false;
 
@@ -1048,6 +1154,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       // set the point cloud
       pcl_conversions::fromPCL(*converted, table_out.point_cloud);
       table_out.point_cloud.header.stamp = ros::Time::now();
+//      ROS_WARN_STREAM(""<< table_out.point_cloud.data.size());
       // create a marker and set the extra fields
       table_out.marker = this->createMarker(converted);
       table_out.marker.id = 0;
@@ -1077,6 +1184,20 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       table_out.center.y = (max_pt[1] + min_pt[1]) / 2.0;
       table_out.center.z = (max_pt[2] + min_pt[2]) / 2.0;
 
+      // calculate color features
+      Eigen::Vector3f rgb, lab;
+      rgb[0] = table_out.marker.color.r;
+      rgb[1] = table_out.marker.color.g;
+      rgb[2] = table_out.marker.color.b;
+      lab = RGB2Lab(rgb);
+      table_out.rgb.resize(3);
+      table_out.cielab.resize(3);
+      table_out.rgb[0] = rgb[0];
+      table_out.rgb[1] = rgb[1];
+      table_out.rgb[2] = rgb[2];
+      table_out.cielab[0] = lab[0];
+      table_out.cielab[1] = lab[1];
+      table_out.cielab[2] = lab[2];
 
       // calculate the orientation
       pcl::PointCloud<pcl::PointXYZRGB>::Ptr projected_cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -1099,6 +1220,10 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       }
       proj.setModelCoefficients(coefficients);
       proj.filter(*projected_cluster);
+
+//      pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
+//      pcl::fromROSMsg(table_.point_cloud, *debug_pc);
+//      debug_pc_pub_.publish(debug_pc);
 
       //calculate the Eigen vectors of the projected point cloud's covariance matrix, used to determine orientation
       Eigen::Vector4f projected_centroid;
@@ -1134,14 +1259,14 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
 }
 
 void Segmenter::extractClustersEuclidean(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
-    const pcl::IndicesConstPtr &indices_in, vector<pcl::PointIndices> &clusters) const
+                                         const pcl::IndicesConstPtr &indices_in, vector<pcl::PointIndices> &clusters) const
 {
   // ignore NaN and infinite values
   pcl::IndicesPtr valid(new vector<int>);
   for (size_t i = 0; i < indices_in->size(); i++)
   {
     if (pcl_isfinite(in->points[indices_in->at(i)].x) & pcl_isfinite(in->points[indices_in->at(i)].y) &
-        pcl_isfinite(in->points[indices_in->at(i)].z))
+      pcl_isfinite(in->points[indices_in->at(i)].z))
     {
       valid->push_back(indices_in->at(i));
     }
@@ -1160,14 +1285,14 @@ void Segmenter::extractClustersEuclidean(const pcl::PointCloud<pcl::PointXYZRGB>
 }
 
 void Segmenter::extractClustersRGB(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
-    const pcl::IndicesConstPtr &indices_in, vector<pcl::PointIndices> &clusters) const
+                                   const pcl::IndicesConstPtr &indices_in, vector<pcl::PointIndices> &clusters) const
 {
   // ignore NaN and infinite values
   pcl::IndicesPtr valid(new vector<int>);
   for (size_t i = 0; i < indices_in->size(); i++)
   {
     if (pcl_isfinite(in->points[indices_in->at(i)].x) & pcl_isfinite(in->points[indices_in->at(i)].y) &
-        pcl_isfinite(in->points[indices_in->at(i)].z))
+      pcl_isfinite(in->points[indices_in->at(i)].z))
     {
       valid->push_back(indices_in->at(i));
     }
@@ -1187,7 +1312,7 @@ void Segmenter::extractClustersRGB(const pcl::PointCloud<pcl::PointXYZRGB>::Cons
 }
 
 sensor_msgs::Image Segmenter::createImage(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
-    const pcl::PointIndices &cluster) const
+                                          const pcl::PointIndices &cluster) const
 {
   // determine the bounds of the cluster
   int row_min = numeric_limits<int>::max();
@@ -1296,9 +1421,9 @@ visualization_msgs::Marker Segmenter::createMarker(const pcl::PCLPointCloud2::Co
 
     // use average RGB
     uint32_t rgb = *reinterpret_cast<int *>(&pc_msg.channels[0].values[j]);
-    r += (int) ((rgb >> 16) & 0x0000ff);
+    b += (int) ((rgb >> 16) & 0x0000ff);
     g += (int) ((rgb >> 8) & 0x0000ff);
-    b += (int) ((rgb) & 0x0000ff);
+    r += (int) ((rgb) & 0x0000ff);
   }
 
   // set average RGB
@@ -1311,7 +1436,7 @@ visualization_msgs::Marker Segmenter::createMarker(const pcl::PCLPointCloud2::Co
 }
 
 void Segmenter::extract(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
-    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &out) const
+                        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &out) const
 {
   pcl::ExtractIndices<pcl::PointXYZRGB> extract;
   extract.setInputCloud(in);
@@ -1320,9 +1445,9 @@ void Segmenter::extract(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in, c
 }
 
 void Segmenter::inverseBound(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
-    const pcl::IndicesConstPtr &indices_in,
-    const pcl::ConditionBase<pcl::PointXYZRGB>::Ptr &conditions,
-    const pcl::IndicesPtr &indices_out) const
+                             const pcl::IndicesConstPtr &indices_in,
+                             const pcl::ConditionBase<pcl::PointXYZRGB>::Ptr &conditions,
+                             const pcl::IndicesPtr &indices_out) const
 {
   // use a temp point cloud to extract the indices
   pcl::PointCloud<pcl::PointXYZRGB> tmp;
