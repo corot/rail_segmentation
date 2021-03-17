@@ -66,6 +66,7 @@ Segmenter::Segmenter() : private_node_("~"), tf2_(tf_buffer_)
     "segmented_table", 1
   );
   markers_pub_ = private_node_.advertise<visualization_msgs::MarkerArray>("markers", 1, true);
+  table_pose_pub_ = private_node_.advertise<geometry_msgs::PoseStamped>("table_pose", 1, true);
   table_marker_pub_ = private_node_.advertise<visualization_msgs::Marker>("table_marker", 1, true);
   // setup a debug publisher if we need it
   if (debug_)
@@ -415,7 +416,7 @@ bool Segmenter::segmentCallback(std_srvs::Empty::Request &req, std_srvs::Empty::
 bool Segmenter::segmentObjectsCallback(rail_manipulation_msgs::SegmentObjects::Request &req,
                                        rail_manipulation_msgs::SegmentObjects::Response &res)
 {
-  return segmentObjects(res.segmented_objects);
+  return segmentObjects(res.segmented_objects, req.only_surface);
 }
 
 bool Segmenter::segmentObjectsFromPointCloudCallback(rail_manipulation_msgs::SegmentObjectsFromPointCloud::Request &req,
@@ -429,7 +430,7 @@ bool Segmenter::segmentObjectsFromPointCloudCallback(rail_manipulation_msgs::Seg
   return executeSegmentation(pc, res.segmented_objects);
 }
 
-bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &objects)
+bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface)
 {
   // get the latest point cloud
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -453,13 +454,13 @@ bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &obje
   }
 
   ros::WallTime t0 = ros::WallTime::now();
-  bool kk= executeSegmentation(pc, objects);
-  printf("%f\n", (ros::WallTime::now() - t0).toSec());
+  bool kk= executeSegmentation(pc, objects, only_surface);
+ // printf("%f\n", (ros::WallTime::now() - t0).toSec());
   return kk;
 }
 
 bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
-                                    rail_manipulation_msgs::SegmentedObjectList &objects)
+                                    rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface)
 {
   // clear the objects first
   std_srvs::Empty empty;
@@ -467,17 +468,17 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
 
   // determine the correct segmentation zone
   const SegmentationZone &zone = this->getCurrentZone();
-  ROS_INFO("Segmenting in zone '%s'.", zone.getName().c_str());
+  ROS_INFO("Segmenting %s in zone '%s'.", only_surface ? "only surfaces" : "objects", zone.getName().c_str());
 
   // transform the point cloud to the fixed frame
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
 
 
-  ROS_INFO("%d", pc->size());
+  //ROS_INFO("%d", pc->size());
   std::vector<int> mapped;
   pcl::removeNaNFromPointCloud<pcl::PointXYZRGB>(*pc, *transformed_pc, mapped);
 
-  ROS_INFO("%d  %d", transformed_pc->size(), mapped.size());
+  //ROS_INFO("%d  %d", transformed_pc->size(), mapped.size());
   pcl_ros::transformPointCloud(zone.getBoundingFrameID(), ros::Time(0), *pc, pc->header.frame_id,
                                *transformed_pc, tf_);
   transformed_pc->header.frame_id = zone.getBoundingFrameID();
@@ -626,7 +627,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
   {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
     this->extract(transformed_pc, filter_indices, debug_pc);
-    debug_pc2_pub_.publish(debug_pc);
+  //  debug_pc2_pub_.publish(debug_pc);
   }
 
 
@@ -640,10 +641,9 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
   table_marker_pub_.publish(table_marker_);
 
   objects.objects.push_back(table_);
-/////  return true;  // TODO table only,  and add as segmented object to avoid the pain of the subscriber
 
-
-
+  if (only_surface)
+    return true;  // client is interested only in segmenting a support surface, no objects
 
   // extract clusters
   vector<pcl::PointIndices> clusters;
@@ -823,8 +823,6 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
         text_marker.pose.position.y = segmented_object.center.y;
         text_marker.pose.position.z = segmented_object.center.z + 0.05 + segmented_object.height/2.0;
 
-        text_marker.scale.x = .1;
-        text_marker.scale.y = .1;
         text_marker.scale.z = .1;
 
         text_marker.color.r = 1;
@@ -1084,7 +1082,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       table_out.centroid.z = -numeric_limits<double>::infinity();
       return false;
     }
-    ROS_WARN_STREAM("plane found   "<< inliers_ptr->indices.size() <<   "     " <<pc_copy->size());
+    //ROS_WARN_STREAM("plane found   "<< inliers_ptr->indices.size() <<   "     " <<pc_copy->size());
 
     // remove the plane
     pcl::PointCloud<pcl::PointXYZRGB> plane;
@@ -1224,7 +1222,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
 //      pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
 //      pcl::fromROSMsg(table_.point_cloud, *debug_pc);
 //      debug_pc_pub_.publish(debug_pc);
-
+/*
       //calculate the Eigen vectors of the projected point cloud's covariance matrix, used to determine orientation
       Eigen::Vector4f projected_centroid;
       Eigen::Matrix3f covariance_matrix;
@@ -1233,25 +1231,115 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
       Eigen::Matrix3f eigen_vectors = eigen_solver.eigenvectors();
       eigen_vectors.col(2) = eigen_vectors.col(0).cross(eigen_vectors.col(1));
-      //calculate rotation from eigenvectors
-      const Eigen::Quaternionf qfinal(eigen_vectors);
+
+
+      // Transform the original cloud to the origin where the principal components correspond to the axes.
+      Eigen::Matrix4f projectionTransform(Eigen::Matrix4f::Identity());
+      projectionTransform.block<3,3>(0,0) = eigen_vectors.transpose();
+      projectionTransform.block<3,1>(0,3) = -1.f * (projectionTransform.block<3,3>(0,0) * projected_centroid.head<3>());
+      pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudPointsProjected (new pcl::PointCloud<pcl::PointXYZRGB>);
+      pcl::transformPointCloud(*projected_cluster, *cloudPointsProjected, projectionTransform);
+      // Get the minimum and maximum points of the transformed cloud.
+      pcl::PointXYZRGB minPoint, maxPoint;
+      pcl::getMinMax3D(*cloudPointsProjected, minPoint, maxPoint);
+      const Eigen::Vector3f meanDiagonal = 0.5f*(maxPoint.getVector3fMap() + minPoint.getVector3fMap());
+
+      // Final transform from eigenvectors
+      const Eigen::Quaternionf bbox_q(eigen_vectors);
+      const Eigen::Vector3f bbox_tf = eigen_vectors * meanDiagonal + projected_centroid.head<3>();
+*/
+      Eigen::Vector4f farthest_pt;
+      Eigen::Vector4f center_pt(table_out.center.x, table_out.center.y, table_out.center.z, 0.0);
+      pcl::getMaxDistance(*projected_cluster, center_pt, farthest_pt);
+
+//      1. tengo las dimensiones, pero son inutiles sin la orientacion
+//      2. tengo q entender los eigen-leches para obtenerla  (o usar otra cosa)
+//      3. por curiosidad, el codigo actual funcionaria con una mesa alargada  -->  comprobarlo
+//      double x1 maxPoint.getVector3fMap() + minPoint.getVector3fMap()
+      double alpha = std::atan(table_out.width / table_out.depth);
+      double beta = std::atan2(farthest_pt.y() - center_pt.y(), farthest_pt.x() - center_pt.x());
+      double theta = std::atan2(farthest_pt.y() - center_pt.y(), farthest_pt.x() - center_pt.x()) - alpha;
+
+      Eigen::Affine3f transform = //Eigen::Affine3f::Identity();
+      //transform.translation() = center_pt.head<3>();
+      pcl::getTransformation(center_pt.x(), center_pt.y(), center_pt.z(), 0.0, 0.0, theta);
+      //transform.rotate(Eigen::AngleAxisf(theta, Eigen::Vector3f::UnitZ()));
+      pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudPointsProjected (new pcl::PointCloud<pcl::PointXYZRGB>);
+      pcl::transformPointCloud(*projected_cluster, *cloudPointsProjected, transform.inverse());
+      // Get the minimum and maximum points of the transformed cloud.
+      pcl::PointXYZRGB minPoint, maxPoint;
+      pcl::getMinMax3D(*cloudPointsProjected, minPoint, maxPoint);
+      table_out.depth = maxPoint.x - minPoint.x;
+      table_out.width = maxPoint.y - minPoint.y;
+  //   TODO    projected_cluster->header.frame_id = "table";
+      debug_pc2_pub_.publish(projected_cluster);
+      debug_pc3_pub_.publish(cloudPointsProjected);
+
+      //Eigen::Vector2f corner_pt(farthest_pt.x() - pivot_pt.x(), farthest_pt.y() - pivot_pt.y());
+/*   de momento solo mesas cuadradas,,,  no hace falta todo esto    mmm.... si, pero entonces los marcos tienen mala orientacion!!!
+      double x = farthest_pt.x() - pivot_pt.x();
+      double y = farthest_pt.y() - pivot_pt.y();
+      Eigen::Vector2f corner_pt((std::cos(theta) * farthest_pt.x() - std::sin(theta) * farthest_pt.y()) - pivot_pt.x(),
+                                (std::sin(theta) * farthest_pt.x() - std::cos(theta) * farthest_pt.y()) - pivot_pt.y());
+//      corner_pt = Eigen::Translation2d(pivot_pt.x(), pivot_pt.y()) * corner_pt;   OSTIAS   esto:  .head<2>()
+//      corner_pt = Eigen::Rotation2D<double>(theta) * corner_pt;
+//        //pcl::transformPoint(
+//
+      ROS_ERROR("%f  %f    %f  %f  %f        %f  %f ", table_out.depth, table_out.width, alpha, beta, theta,
+                corner_pt.x(), corner_pt.y());
+      if (std::abs(std::abs(corner_pt.y()) - table_out.width/2.0) > 0.01)
+      {
+        theta = std::atan2(farthest_pt.y() - pivot_pt.y(), farthest_pt.x() - pivot_pt.x()) + alpha;
+        corner_pt = Eigen::Vector2f(std::cos(theta) * x - std::sin(theta) * y, std::sin(theta) * x - std::cos(theta) * y);
+//        corner_pt = Eigen::Translation2d(pivot_pt) * farthest_pt;
+//        corner_pt = Eigen::Rotation2D<double>(theta) * corner_pt;
+        ROS_ERROR("%f  %f    %f  %f  %f        %f  %f ", table_out.depth, table_out.width, alpha, beta, theta,
+                  corner_pt.x(), corner_pt.y());
+      }
+    */  table_out.orientation = tf::createQuaternionMsgFromYaw(theta);
+      geometry_msgs::PoseStamped table_pose;
+      table_pose.header.frame_id = zone.getSegmentationFrameID();
+      table_pose.pose.position = table_.center;
+//      table_pose.pose.position.x = bbox_tf.x();
+//      table_pose.pose.position.y = bbox_tf.y();
+//      table_pose.pose.position.z = bbox_tf.z();
+//      table_pose.pose.orientation.x = bbox_q.x();
+//      table_pose.pose.orientation.y = bbox_q.y();
+//      table_pose.pose.orientation.z = bbox_q.z();
+//      table_pose.pose.orientation.w = bbox_q.w();
+      table_pose.pose.orientation = tf::createQuaternionMsgFromYaw(theta);
+        table_pose_pub_.publish(table_pose);
+      table_marker_pub_.publish(createMarker(table_pose, center_pt, farthest_pt));
+//      table_marker_pub_.publish(createMarker(zone.getSegmentationFrameID(), bbox_tf, bbox_q, minPoint, maxPoint));
+      table_marker_pub_.publish(createMarker(table_pose, minPoint, maxPoint));
+      // This viewer has 4 windows, but is only showing images in one of them as written here.
+//      pcl::visualization::PCLVisualizer *visu;
+//      visu = new pcl::visualization::PCLVisualizer("PlyViewer");
+//      int mesh_vp_1, mesh_vp_2, mesh_vp_3, mesh_vp_4;
+//      visu->createViewPort (0.0, 0.5, 0.5, 1.0,  mesh_vp_1);
+//      visu->createViewPort (0.5, 0.5, 1.0, 1.0,  mesh_vp_2);
+//      visu->createViewPort (0.0, 0, 0.5, 0.5,  mesh_vp_3);
+//      visu->createViewPort (0.5, 0, 1.0, 0.5, mesh_vp_4);
+//      visu->addPointCloud(projected_cluster, "bboxedCloud", mesh_vp_3);
+//      visu->addCube(bbox_tf, bbox_q, maxPoint.x - minPoint.x, maxPoint.y - minPoint.y, maxPoint.z - minPoint.z, "bbox", mesh_vp_3);
+      ///visu->addCube(projected_centroid, bbox_q, 0.1, 0.1, 0.1, "centroid", mesh_vp_3);
 
       //convert orientation to a single angle on the 2D plane defined by the segmentation coordinate frame
-      tf::Quaternion tf_quat;
-      tf_quat.setValue(qfinal.x(), qfinal.y(), qfinal.z(), qfinal.w());
-      double r, p, y;
-      tf::Matrix3x3 m(tf_quat);
-      m.getRPY(r, p, y);
-      double angle = r + y;
-      while (angle < -M_PI)
-      {
-        angle += 2 * M_PI;
-      }
-      while (angle > M_PI)
-      {
-        angle -= 2 * M_PI;
-      }
-      table_out.orientation = tf::createQuaternionMsgFromYaw(angle);
+//      tf::Quaternion tf_quat;
+//      tf_quat.setValue(bbox_q.x(), bbox_q.y(), bbox_q.z(), bbox_q.w());
+//      double r, p, y;
+//      tf::Matrix3x3 m(tf_quat);
+//      m.getRPY(r, p, y);
+//      double angle = r + y;
+//      while (angle < -M_PI)
+//      {
+//        angle += 2 * M_PI;
+//      }
+//      while (angle > M_PI)
+//      {
+//        angle -= 2 * M_PI;
+//      }
+//      table_out.orientation = tf::createQuaternionMsgFromYaw(angle);
 
       return true;
     }
@@ -1378,6 +1466,7 @@ visualization_msgs::Marker Segmenter::createMarker(const pcl::PCLPointCloud2::Co
   visualization_msgs::Marker marker;
   // set header field
   marker.header.frame_id = pc->header.frame_id;
+  marker.ns = "segmentation_objects";
 
   // default position
   marker.pose.position.x = 0.0;
@@ -1431,6 +1520,81 @@ visualization_msgs::Marker Segmenter::createMarker(const pcl::PCLPointCloud2::Co
   marker.color.g = ((float) g / (float) pc_msg.points.size()) / 255.0;
   marker.color.b = ((float) b / (float) pc_msg.points.size()) / 255.0;
   marker.color.a = 1.0;
+
+  return marker;
+}
+
+visualization_msgs::Marker Segmenter::createMarker(const geometry_msgs::PoseStamped& table_pose,
+                                                   const pcl::PointXYZRGB& min_pt, const pcl::PointXYZRGB& max_pt) const
+{
+  visualization_msgs::Marker marker;
+  // set header field
+  marker.header.frame_id = table_pose.header.frame_id;
+  marker.ns = "rotated_bbox";
+
+  // default position
+//  marker.pose.position.x = bbox_tf.x();
+//  marker.pose.position.y = bbox_tf.y();
+//  marker.pose.position.z = bbox_tf.z();
+//  marker.pose.orientation.x = bbox_q.x();
+//  marker.pose.orientation.y = bbox_q.y();
+//  marker.pose.orientation.z = bbox_q.z();
+//  marker.pose.orientation.w = bbox_q.w();
+  marker.pose = table_pose.pose;
+
+
+  // default scale
+  marker.scale.x = max_pt.x - min_pt.x;
+  marker.scale.y = max_pt.y - min_pt.y;
+  marker.scale.z = max_pt.z - min_pt.z;
+
+  // set the type of marker and our color of choice
+  marker.type = visualization_msgs::Marker::CUBE;
+  marker.color.r = 1.0;
+  marker.color.g = 1.0;
+  marker.color.a = 0.2;
+
+  return marker;
+}
+
+
+visualization_msgs::Marker Segmenter::createMarker(const geometry_msgs::PoseStamped& table_pose,
+                                                   const Eigen::Vector4f& min_pt, const Eigen::Vector4f& max_pt) const
+{
+  visualization_msgs::Marker marker;
+  // set header field
+  marker.header.frame_id = table_pose.header.frame_id;
+  marker.ns = "orig_bbox";
+
+  // default position
+
+//  marker.pose = table_pose.pose;
+//  marker.pose.position.x = bbox_tf.x();
+//  marker.pose.position.y = bbox_tf.y();
+//  marker.pose.position.z = bbox_tf.z();
+//  marker.pose.orientation.x = bbox_q.x();
+//  marker.pose.orientation.y = bbox_q.y();
+//  marker.pose.orientation.z = bbox_q.z();
+//  marker.pose.orientation.w = bbox_q.w();
+  marker.pose.orientation.w = 1;
+
+  // default scale
+  marker.scale.x = 0.15;
+  marker.scale.y = 0.15;
+
+  // set the type of marker and our color of choice
+  marker.type = visualization_msgs::Marker::POINTS;
+  marker.color.g = 1.0;
+  marker.color.a = 0.5;
+
+  // place in the marker message
+  marker.points.resize(3);
+  marker.points[1].x = min_pt.x();
+  marker.points[1].y = min_pt.y();
+  marker.points[1].z = min_pt.z();
+  marker.points[2].x = max_pt.x();
+  marker.points[2].y = max_pt.y();
+  marker.points[2].z = max_pt.z();
 
   return marker;
 }
