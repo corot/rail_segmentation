@@ -454,6 +454,9 @@ bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &obje
   }
 
   ros::WallTime t0 = ros::WallTime::now();
+
+  std::vector<int> indices;
+  pcl::removeNaNFromPointCloud(*pc, *pc, indices);
   bool kk= executeSegmentation(pc, objects, only_surface);
  // printf("%f\n", (ros::WallTime::now() - t0).toSec());
   return kk;
@@ -555,18 +558,27 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
   // remove past the given bounds
   this->inverseBound(transformed_pc, filter_indices, bounds, filter_indices);
 
-  //ROS_INFO("%d", filter_indices->size());
-  //ROS_INFO("%d", transformed_pc->size());
+//  ROS_INFO("%d", filter_indices->size());
+//  ROS_INFO("%d", transformed_pc->size());
+//  ROS_INFO("%d", min_surface_size_);
   ////pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
   this->extract(transformed_pc, filter_indices, transformed_pc);
 
   //ROS_INFO("%d", transformed_pc->size());
-  debug_pc1_pub_.publish(transformed_pc);
+  if (debug_)
+    debug_pc1_pub_.publish(transformed_pc);
 
   if (crop_first_)
   {
     if (zone.getRemoveSurface())
     {
+      if (transformed_pc->size() < min_surface_size_)
+      {
+        objects.objects.clear();
+        ROS_INFO("Cropped pointcloud too small to contain a valid surface (%lu < %d). Exiting segmentation.",
+                 transformed_pc->size(), min_surface_size_);
+        return true;
+      }
       bool surface_found = this->findSurface(transformed_pc, filter_indices, zone, filter_indices, table_);
       if (zone.getRequireSurface() && !surface_found)
       {
@@ -1041,7 +1053,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
 
   pcl::SACSegmentationFromNormals<pcl::PointXYZRGB, pcl::Normal> plane_seg;
   plane_seg.setNormalDistanceWeight(0.1);
-  plane_seg.setOptimizeCoefficients(true);
+  plane_seg.setOptimizeCoefficients(false);  // not really needed, and avoids a horrible log error
   plane_seg.setModelType(pcl::SACMODEL_NORMAL_PARALLEL_PLANE);
   plane_seg.setAxis(Eigen::Vector3f(0, 0, 1));
   plane_seg.setEpsAngle(SAC_EPS_ANGLE);
@@ -1068,7 +1080,6 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
   {
     // points included in the plane (surface)
     pcl::PointIndices::Ptr inliers_ptr(new pcl::PointIndices);
- //   ROS_WARN("seg");
     // segment the the current cloud
     pcl::ModelCoefficients coefficients;
     plane_seg.segment(*inliers_ptr, coefficients);
@@ -1135,7 +1146,8 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
 
       //  pcl::fromROSMsg(table_.point_cloud, *debug_pc);
       // this->extract(transformed_pc, filter_indices, debug_pc);
-      debug_pc3_pub_.publish(plane);
+      if (debug_)
+        debug_pc3_pub_.publish(plane);
 
       // convert to a SegmentedObject message
       table_out.recognized = false;
@@ -1272,9 +1284,11 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       table_out.depth = maxPoint.x - minPoint.x;
       table_out.width = maxPoint.y - minPoint.y;
   //   TODO    projected_cluster->header.frame_id = "table";
-      debug_pc2_pub_.publish(projected_cluster);
-      debug_pc3_pub_.publish(cloudPointsProjected);
-
+      if (debug_)
+      {
+        debug_pc2_pub_.publish(projected_cluster);
+        debug_pc3_pub_.publish(cloudPointsProjected);
+      }
       //Eigen::Vector2f corner_pt(farthest_pt.x() - pivot_pt.x(), farthest_pt.y() - pivot_pt.y());
 /*   de momento solo mesas cuadradas,,,  no hace falta todo esto    mmm.... si, pero entonces los marcos tienen mala orientacion!!!
       double x = farthest_pt.x() - pivot_pt.x();
