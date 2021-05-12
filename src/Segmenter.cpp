@@ -10,6 +10,8 @@
  * \date January 12, 2016
  */
 
+#include <omp.h>
+
 // RAIL Segmentation
 #include "rail_segmentation/Segmenter.h"
 
@@ -502,7 +504,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
   {
     if (zone.getRemoveSurface())
     {
-      bool surface_found = this->findSurface(transformed_pc, filter_indices, zone, filter_indices, table_);
+      bool surface_found = this->findSurface(transformed_pc, filter_indices, zone, filter_indices, only_surface, table_);
       if (zone.getRequireSurface() && !surface_found)
       {
         objects.objects.clear();
@@ -579,7 +581,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
                  transformed_pc->size(), min_surface_size_);
         return true;
       }
-      bool surface_found = this->findSurface(transformed_pc, filter_indices, zone, filter_indices, table_);
+      bool surface_found = this->findSurface(transformed_pc, filter_indices, zone, filter_indices, only_surface, table_);
       if (zone.getRequireSurface() && !surface_found)
       {
         objects.objects.clear();
@@ -657,6 +659,8 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
   if (only_surface)
     return true;  // client is interested only in segmenting a support surface, no objects
 
+  //ros::WallTime t0 = ros::WallTime::now();
+
   // extract clusters
   vector<pcl::PointIndices> clusters;
   if (use_color_)
@@ -664,13 +668,18 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
   else
     this->extractClustersEuclidean(transformed_pc, filter_indices, clusters);
 
+  //printf("\n%f\n", (ros::WallTime::now() - t0).toSec());
+  //t0 = ros::WallTime::now();
+
   if (clusters.size() > 0)
   {
     // lock for the messages
     boost::mutex::scoped_lock lock(msg_mutex_);
     // check each cluster
+    //#pragma omp parallel for    // NOLINT
     for (size_t i = 0; i < clusters.size(); i++)
     {
+      //ROS_ERROR("%d / %d", omp_get_thread_num(), omp_get_num_threads());
       // Keep track of image indices of points in the cluster
       vector<int> cluster_indices;
       // grab the points we need
@@ -816,6 +825,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
       }
       segmented_object.orientation = tf::createQuaternionMsgFromYaw(angle);
 
+      //#pragma omp critical
       // add to the final list
       objects.objects.push_back(segmented_object);
       // add to the markers
@@ -848,6 +858,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
 
         text_markers_.markers.push_back(text_marker);
       }
+      //ROS_ERROR("%d done", omp_get_thread_num());
     }
 
     // create the new list
@@ -876,6 +887,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
   {
     ROS_WARN("No segmented objects found.");
   }
+  //printf("\n%f\n", (ros::WallTime::now() - t0).toSec());
 
   // publish the table, even if found no segmented objects
 
@@ -1030,8 +1042,9 @@ void getPlaneTransform(const cv::Vec4f& plane_coefficients, cv::Matx33f& rotatio
 */
 bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
                             const pcl::IndicesConstPtr &indices_in, const SegmentationZone &zone, const pcl::IndicesPtr &indices_out,
-                            rail_manipulation_msgs::SegmentedObject &table_out) const
+                            bool check_contiguous, rail_manipulation_msgs::SegmentedObject &table_out) const
 {
+ros::WallTime t0 = ros::WallTime::now();
 
   // use a plane (SAC) segmenter
 //  pcl::SACSegmentation<pcl::PointXYZRGB> plane_seg;
@@ -1093,15 +1106,15 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       table_out.centroid.z = -numeric_limits<double>::infinity();
       return false;
     }
-    //ROS_WARN_STREAM("plane found   "<< inliers_ptr->indices.size() <<   "     " <<pc_copy->size());
+    ROS_WARN_STREAM("plane found   "<< inliers_ptr->indices.size() <<   "     " <<pc_copy->size());
 
     // remove the plane
-    pcl::PointCloud<pcl::PointXYZRGB> plane;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr plane(new pcl::PointCloud<pcl::PointXYZRGB>);
     pcl::ExtractIndices<pcl::PointXYZRGB> extract(true);
     extract.setInputCloud(pc_copy);
     extract.setIndices(inliers_ptr);
     extract.setNegative(false);
-    extract.filter(plane);
+    extract.filter(*plane);
 
     extract.setKeepOrganized(true);  // otherwise replaces the removed points with NaN   Can't use 2D indexing with a unorganized point clou
    // ROS_WARN("setIndices");
@@ -1121,10 +1134,24 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
   //  ROS_WARN_STREAM("NORM     " <<pc_copy->size());
 
     // check the height
-    double height = this->averageZ(plane.points);
+    double height = this->averageZ(plane->points);
     if (height >= zone.getZMin() && height <= zone.getZMax())
     {
       ROS_INFO("Surface found at %fm.", height);
+
+      if (check_contiguous)
+      {
+        std::vector<pcl::PointIndices> clusters;
+        tree->setInputCloud(plane);
+        pcl::extractEuclideanClusters<pcl::PointXYZRGB>(
+            *plane, tree, 0.01f, clusters, min_surface_size_ / 2.0);
+        if (clusters.size() > 1) {
+          ROS_WARN("Discarding not-contiguous surface (%lu clusters)",
+                   clusters.size());
+          return false;
+        }
+      }
+
       *indices_out = *plane_seg.getIndices();
 
       // check if we need to transform to a different frame
@@ -1133,15 +1160,15 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       if (zone.getBoundingFrameID() != zone.getSegmentationFrameID())
       {
         // perform the copy/transform using TF
-        pcl_ros::transformPointCloud(zone.getSegmentationFrameID(), ros::Time(0), plane, plane.header.frame_id,
+        pcl_ros::transformPointCloud(zone.getSegmentationFrameID(), ros::Time(0), *plane, plane->header.frame_id,
                                      *transformed_pc, tf_);
         transformed_pc->header.frame_id = zone.getSegmentationFrameID();
-        transformed_pc->header.seq = plane.header.seq;
-        transformed_pc->header.stamp = plane.header.stamp;
+        transformed_pc->header.seq = plane->header.seq;
+        transformed_pc->header.stamp = plane->header.stamp;
         pcl::toPCLPointCloud2(*transformed_pc, *converted);
       } else
       {
-        pcl::toPCLPointCloud2(plane, *converted);
+        pcl::toPCLPointCloud2(*plane, *converted);
       }
 
       //  pcl::fromROSMsg(table_.point_cloud, *debug_pc);
@@ -1176,7 +1203,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
         pcl::compute3DCentroid(*transformed_pc, centroid);
       } else
       {
-        pcl::compute3DCentroid(plane, centroid);
+        pcl::compute3DCentroid(*plane, centroid);
       }
       table_out.centroid.x = centroid[0];
       table_out.centroid.y = centroid[1];
@@ -1184,7 +1211,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
 
       // calculate the bounding box
       Eigen::Vector4f min_pt, max_pt;
-      pcl::getMinMax3D(plane, min_pt, max_pt);
+      pcl::getMinMax3D(*plane, min_pt, max_pt);
       table_out.width = max_pt[0] - min_pt[0];
       table_out.depth = max_pt[1] - min_pt[1];
       table_out.height = max_pt[2] - min_pt[2];
@@ -1223,10 +1250,10 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       if (zone.getBoundingFrameID() != zone.getSegmentationFrameID())
       {
         proj.setInputCloud(transformed_pc);
-      } else
+      }
+      else
       {
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr plane_ptr(new pcl::PointCloud<pcl::PointXYZRGB>(plane));
-        proj.setInputCloud(plane_ptr);
+        proj.setInputCloud(plane);
       }
       proj.setModelCoefficients(coefficients);
       proj.filter(*projected_cluster);
@@ -1355,6 +1382,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
 //      }
 //      table_out.orientation = tf::createQuaternionMsgFromYaw(angle);
 
+//      printf("%f\n", (ros::WallTime::now() - t0).toSec());
       return true;
     }
   }

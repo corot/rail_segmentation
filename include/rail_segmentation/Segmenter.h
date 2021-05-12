@@ -264,7 +264,7 @@ private:
      * \return true if a surface was found, false otherwise
      */
     bool findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
-        const SegmentationZone &zone, const pcl::IndicesPtr &indices_out,
+        const SegmentationZone &zone, const pcl::IndicesPtr &indices_out, bool check_contiguous,
         rail_manipulation_msgs::SegmentedObject &table_out) const;
 
     /*!
