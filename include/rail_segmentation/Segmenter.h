@@ -53,6 +53,7 @@
 #include <pcl/segmentation/region_growing_rgb.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/sample_consensus/sac_model_normal_plane.h>
+#include <pcl/surface/convex_hull.h>
 
 // PCL visualization (debug only)
 #include <pcl/visualization/point_cloud_color_handlers.h>
@@ -337,11 +338,13 @@ private:
      */
     visualization_msgs::Marker createMarker(const pcl::PCLPointCloud2::ConstPtr &pc) const;
 
-    visualization_msgs::Marker createMarker(const geometry_msgs::PoseStamped& table_pose,
-                                            const pcl::PointXYZRGB& min_pt, const pcl::PointXYZRGB& max_pt) const;
   visualization_msgs::Marker createMarker(const geometry_msgs::PoseStamped& table_pose,
-                                          const Eigen::Vector4f& min_pt, const Eigen::Vector4f& max_pt) const;
+                                                     const pcl::PointXYZRGB& min_x, const pcl::PointXYZRGB& max_x,
+                                                     const pcl::PointXYZRGB& min_y, const pcl::PointXYZRGB& max_y) const;
+        visualization_msgs::Marker createMarker(const pcl::PointXYZRGB& max_pt) const;
 
+  visualization_msgs::Marker createMarker(const geometry_msgs::PoseStamped& table_pose,
+                                          const std::vector<pcl::PointXYZRGB>& points) const;
     /*!
      * \brief Create a cropped image of the segmented object.
      *
@@ -374,7 +377,8 @@ private:
     /*! Services advertised by this node */
     ros::ServiceServer segment_srv_, segment_objects_srv_, segment_objects_from_point_cloud_srv_, clear_srv_, remove_object_srv_, calculate_features_srv_;
     /*! Publishers used in the node. */
-    ros::Publisher segmented_objects_pub_, table_pub_, table_pose_pub_, markers_pub_, table_marker_pub_, debug_pc1_pub_, debug_pc2_pub_, debug_pc3_pub_, debug_img_pub_;
+    ros::Publisher segmented_objects_pub_, table_pub_, table_pose_pub_, markers_pub_, table_marker_pub_, hull_marker_pub_, zone_pc_pub_,
+        surface_pub_, b_cluster_pub_, projected_pub_, hull_pc_pub_, debug_img_pub_;
     /*! Subscribers used in the node. */
 //  ros::Subscriber point_cloud_sub_;
     /*! Main transform listener. */
