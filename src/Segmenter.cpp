@@ -272,12 +272,12 @@ Segmenter::Segmenter() : private_node_("~"), tf2_(tf_buffer_)
   // check how many zones we have
   if (zones_.size() > 0)
   {
-    ROS_INFO("%d segmenation zone(s) parsed.", (int) zones_.size());
+    ROS_INFO("%d segmentation zone(s) parsed.", (int) zones_.size());
     ROS_INFO("Segmenter Successfully Initialized");
     okay_ = true;
   } else
   {
-    ROS_ERROR("No valid segmenation zones defined. Check %s.", zones_file.c_str());
+    ROS_ERROR("No valid segmentation zones defined. Check %s.", zones_file.c_str());
     okay_ = false;
   }
 }
@@ -1022,27 +1022,6 @@ bool Segmenter::calculateFeaturesCallback(rail_manipulation_msgs::ProcessSegment
   return true;
 }
 
-/*
-void getPlaneTransform(const cv::Vec4f& plane_coefficients, cv::Matx33f& rotation, cv::Vec3f& translation)
-{
-  double a = plane_coefficients[0], b = plane_coefficients[1], c = plane_coefficients[2], d = plane_coefficients[3];
-  // assume plane coefficients are normalized
-  translation = cv::Vec3f(-a * d, -b * d, -c * d);
-  cv::Vec3f z(a, b, c);
-
-  //try to align the x axis with the x axis of the original frame
-  //or the y axis if z and x are too close too each other
-  cv::Vec3f x(1, 0, 0);
-  if (fabs(z.dot(x)) > 1.0 - 1.0e-4)
-    x = cv::Vec3f(0, 1, 0);
-  cv::Vec3f y = z.cross(x);
-  x = y.cross(z);
-  x = x / norm(x);
-  y = y / norm(y);
-
-  rotation = cv::Matx33f(x[0], y[0], z[0], x[1], y[1], z[1], x[2], y[2], z[2]);
-};
-*/
 
 bool sortCornersCW(const pcl::PointXYZRGB& center, std::vector<pcl::PointXYZRGB>& corners)
 {
@@ -1115,7 +1094,7 @@ ros::WallTime t0 = ros::WallTime::now();
     // check if we found a surface
     if (inliers_ptr->indices.size() < min_surface_size_)
     {
-      ROS_WARN("Could not find a surface above %fm and below %fm with more than %d point (biggest has %lu).",
+      ROS_WARN("Could not find a surface above %fm and below %fm with more than %d points (biggest has %lu).",
                zone.getZMin(), zone.getZMax(), min_surface_size_, inliers_ptr->indices.size());
       //// *indices_out = *indices_in;
       table_out.centroid.z = -numeric_limits<double>::infinity(); // TODO why???   i don't use it
@@ -1125,7 +1104,7 @@ ros::WallTime t0 = ros::WallTime::now();
 
     // remove the plane
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr plane(new pcl::PointCloud<pcl::PointXYZRGB>);
-    pcl::ExtractIndices<pcl::PointXYZRGB> extract_segmented_plane(true);
+    pcl::ExtractIndices<pcl::PointXYZRGB> extract_segmented_plane(true);    // TODO can use extract method?  ojo con el tru y keep organized!!!
     extract_segmented_plane.setInputCloud(pc_copy);
     extract_segmented_plane.setIndices(inliers_ptr);
     extract_segmented_plane.setNegative(false);
@@ -1141,60 +1120,43 @@ ros::WallTime t0 = ros::WallTime::now();
     if (debug_)
       surface_pub_.publish(plane);
 
-  //  ROS_WARN_STREAM("avg z  " << this->averageZ(plane.points) << "     " <<pc_copy->size() << "     " <<extract_segmented_plane.getRemovedIndices()->size());
-
-    // Create the filtering object
-//    extract_segmented_plane.setNegative(true);
-//    extract_segmented_plane.filter(*pc_copy);
-    /////cloud_filtered.swap (cloud_f);
-    ///   plane_seg.setInputCloud(pc_copy);  //TRY TO REMOVE  TODO
-//    plane_seg.setIndices(extract_segmented_plane.getRemovedIndices());
-
-  //  ROS_WARN_STREAM("NORM     " <<pc_copy->size());
 
     // check the height
     double height = this->averageZ(plane->points);
     if (height >= zone.getZMin() && height <= zone.getZMax())
     {
       ROS_INFO("Surface found at %fm.", height);
+      *indices_out = *plane_seg.getIndices();
 
       if (check_contiguous)
       {
         std::vector<pcl::PointIndices> clusters;
         tree->setInputCloud(plane);
-        pcl::extractEuclideanClusters<pcl::PointXYZRGB>(*plane, tree, 0.02f, clusters);    ///TODO,,, q hace con los menores q esto?  los descarta o los add a otro cluster mayor?  / 2.0);
+        pcl::extractEuclideanClusters<pcl::PointXYZRGB>(*plane, tree, 0.02f, clusters);
         if (clusters.size() > 1)
         {
-          ROS_WARN("Discarding not-contiguous surface (%lu clusters)", clusters.size());
-          //return false;
-//          for (auto& cluster : clusters)
-//            printf("%lu  ", cluster.indices.size());
-//          printf("\n");
           std::partial_sort(clusters.begin(), clusters.begin() + 2, clusters.end(),
                             [](const pcl::PointIndices& a, const pcl::PointIndices& b) {
                               return a.indices.size() > b.indices.size();
                             });
-//          ROS_WARN("biggest %lu \n", clusters.front().indices.size());
-//          printf("biggest %lu \n", clusters.front().indices.size());
-//          ROS_ERROR("old plane size %lu", plane->size());
-//          for (auto& cluster : clusters)
-//            printf("%lu  ", cluster.indices.size());
-//          printf("\n");
+          if (clusters.front().indices.size() < min_surface_size_)
+          {
+            ROS_WARN("Discarding not-contiguous surface with %lu clusters, as biggest has %lu points (threshold is %d)",
+                     clusters.size(), clusters.front().indices.size(), min_surface_size_);
+            return false;
+          }
           pcl::IndicesPtr indices(new std::vector<int>);
           indices->swap(clusters.front().indices);
 
-          pcl::ExtractIndices<pcl::PointXYZRGB> extract_biggest_cluster;
+          pcl::ExtractIndices<pcl::PointXYZRGB> extract_biggest_cluster;  // TODO use extract method
           extract_biggest_cluster.setInputCloud(plane);
           extract_biggest_cluster.setIndices(indices);
           extract_biggest_cluster.setNegative(false);
-       //   extract_segmented_plane.setKeepOrganized(true); // o no estoy filtrando el plane!!!   GOOGLE HOW TO EXTRACT,,,  tiene truco!!!  ah,,,  creo q cambia a NaN todo lo q no esta en index!!!!       y xq hostias CLion no muestra INFO y WARN????
-          extract_biggest_cluster.filter(*plane);         //  try asi
-//          ROS_WARN("new plane size %lu", plane->size());
-//          ROS_ERROR("new plane size %lu", plane->size());
+          extract_biggest_cluster.filter(*plane);
+          *indices_out = clusters.front().indices;
           b_cluster_pub_.publish(plane);
         }
       }
-      *indices_out = *plane_seg.getIndices();  // ???
 
       // check if we need to transform to a different frame
       pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -1208,15 +1170,11 @@ ros::WallTime t0 = ros::WallTime::now();
         transformed_pc->header.seq = plane->header.seq;
         transformed_pc->header.stamp = plane->header.stamp;
         pcl::toPCLPointCloud2(*transformed_pc, *converted);
-      } else
+      }
+      else
       {
         pcl::toPCLPointCloud2(*plane, *converted);
       }
-
-      //  pcl::fromROSMsg(table_.point_cloud, *debug_pc);
-      // this->extract_segmented_plane(transformed_pc, filter_indices, debug_pc);
-//      if (debug_)
-//        surface_pub_.publish(plane);
 
       // convert to a SegmentedObject message
       table_out.recognized = false;
@@ -1233,7 +1191,7 @@ ros::WallTime t0 = ros::WallTime::now();
       // set the point cloud
       pcl_conversions::fromPCL(*converted, table_out.point_cloud);
       table_out.point_cloud.header.stamp = ros::Time::now();
-//      ROS_WARN_STREAM(""<< table_out.point_cloud.data.size());
+
       // create a marker and set the extra fields
       table_out.marker = this->createMarker(converted);
       table_out.marker.id = 0;
@@ -1243,7 +1201,8 @@ ros::WallTime t0 = ros::WallTime::now();
       if (zone.getBoundingFrameID() != zone.getSegmentationFrameID())
       {
         pcl::compute3DCentroid(*transformed_pc, centroid);
-      } else
+      }
+      else
       {
         pcl::compute3DCentroid(*plane, centroid);
       }
@@ -1279,8 +1238,9 @@ ros::WallTime t0 = ros::WallTime::now();
       table_out.cielab[2] = lab[2];
 
       // calculate the orientation
-      pcl::PointCloud<pcl::PointXYZRGB>::Ptr projected_cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
+
       // project point cloud onto the xy plane
+      pcl::PointCloud<pcl::PointXYZRGB>::Ptr projected_cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
       pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients());
       coefficients->values.resize(4);
       coefficients->values[0] = 0;
@@ -1300,93 +1260,12 @@ ros::WallTime t0 = ros::WallTime::now();
       proj.setModelCoefficients(coefficients);
       proj.filter(*projected_cluster);
       projected_pub_.publish(projected_cluster);
-//      pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
-//      pcl::fromROSMsg(table_.point_cloud, *debug_pc);
-//      debug_pc_pub_.publish(debug_pc);
-/*
-      //calculate the Eigen vectors of the projected point cloud's covariance matrix, used to determine orientation
-      Eigen::Vector4f projected_centroid;
-      Eigen::Matrix3f covariance_matrix;
-      pcl::compute3DCentroid(*projected_cluster, projected_centroid);
-      pcl::computeCovarianceMatrixNormalized(*projected_cluster, projected_centroid, covariance_matrix);
-      Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
-      Eigen::Matrix3f eigen_vectors = eigen_solver.eigenvectors();
-      eigen_vectors.col(2) = eigen_vectors.col(0).cross(eigen_vectors.col(1));
 
-
-      // Transform the original cloud to the origin where the principal components correspond to the axes.
-      Eigen::Matrix4f projectionTransform(Eigen::Matrix4f::Identity());
-      projectionTransform.block<3,3>(0,0) = eigen_vectors.transpose();
-      projectionTransform.block<3,1>(0,3) = -1.f * (projectionTransform.block<3,3>(0,0) * projected_centroid.head<3>());
-      pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudPointsProjected (new pcl::PointCloud<pcl::PointXYZRGB>);
-      pcl::transformPointCloud(*projected_cluster, *cloudPointsProjected, projectionTransform);
-      // Get the minimum and maximum points of the transformed cloud.
-      pcl::PointXYZRGB minPoint, maxPoint;
-      pcl::getMinMax3D(*cloudPointsProjected, minPoint, maxPoint);
-      const Eigen::Vector3f meanDiagonal = 0.5f*(maxPoint.getVector3fMap() + minPoint.getVector3fMap());
-
-      // Final transform from eigenvectors
-      const Eigen::Quaternionf bbox_q(eigen_vectors);
-      const Eigen::Vector3f bbox_tf = eigen_vectors * meanDiagonal + projected_centroid.head<3>();
-
-      Eigen::Vector4f farthest_pt;
-      Eigen::Vector4f center_pt(table_out.center.x, table_out.center.y, table_out.center.z, 0.0);
-      pcl::getMaxDistance(*projected_cluster, center_pt, farthest_pt);
-
-//      1. tengo las dimensiones, pero son inutiles sin la orientacion
-//      2. tengo q entender los eigen-leches para obtenerla  (o usar otra cosa)
-//      3. por curiosidad, el codigo actual funcionaria con una mesa alargada  -->  comprobarlo
-//      double x1 maxPoint.getVector3fMap() + minPoint.getVector3fMap()
-      double alpha = std::atan(table_out.width / table_out.depth);
-      double beta = std::atan2(farthest_pt.y() - center_pt.y(), farthest_pt.x() - center_pt.x());
-      double theta = std::atan2(farthest_pt.y() - center_pt.y(), farthest_pt.x() - center_pt.x()) - alpha;
-
-      Eigen::Affine3f transform = //Eigen::Affine3f::Identity();
-      //transform.translation() = center_pt.head<3>();
-      pcl::getTransformation(center_pt.x(), center_pt.y(), center_pt.z(), 0.0, 0.0, theta);
-      //transform.rotate(Eigen::AngleAxisf(theta, Eigen::Vector3f::UnitZ()));
-      pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudPointsProjected (new pcl::PointCloud<pcl::PointXYZRGB>);
-      pcl::transformPointCloud(*projected_cluster, *cloudPointsProjected, transform.inverse());
-      // Get the minimum and maximum points of the transformed cloud.
-      pcl::PointXYZRGB minPoint, maxPoint;
-      pcl::getMinMax3D(*cloudPointsProjected, minPoint, maxPoint);
-      table_out.depth = maxPoint.x - minPoint.x;
-      table_out.width = maxPoint.y - minPoint.y;
-  //   TODO    projected_cluster->header.frame_id = "table";
-      if (debug_)
-      {
-        surface_pub_.publish(projected_cluster);
-        main_cluster_pub_.publish(cloudPointsProjected);
-      }
-      //Eigen::Vector2f corner_pt(farthest_pt.x() - pivot_pt.x(), farthest_pt.y() - pivot_pt.y());
-/*   de momento solo mesas cuadradas,,,  no hace falta todo esto    mmm.... si, pero entonces los marcos tienen mala orientacion!!!
-      double x = farthest_pt.x() - pivot_pt.x();
-      double y = farthest_pt.y() - pivot_pt.y();
-      Eigen::Vector2f corner_pt((std::cos(theta) * farthest_pt.x() - std::sin(theta) * farthest_pt.y()) - pivot_pt.x(),
-                                (std::sin(theta) * farthest_pt.x() - std::cos(theta) * farthest_pt.y()) - pivot_pt.y());
-//      corner_pt = Eigen::Translation2d(pivot_pt.x(), pivot_pt.y()) * corner_pt;   OSTIAS   esto:  .head<2>()
-//      corner_pt = Eigen::Rotation2D<double>(theta) * corner_pt;
-//        //pcl::transformPoint(
-//
-      ROS_ERROR("%f  %f    %f  %f  %f        %f  %f ", table_out.depth, table_out.width, alpha, beta, theta,
-                corner_pt.x(), corner_pt.y());
-      if (std::abs(std::abs(corner_pt.y()) - table_out.width/2.0) > 0.01)
-      {
-        theta = std::atan2(farthest_pt.y() - pivot_pt.y(), farthest_pt.x() - pivot_pt.x()) + alpha;
-        corner_pt = Eigen::Vector2f(std::cos(theta) * x - std::sin(theta) * y, std::sin(theta) * x - std::cos(theta) * y);
-//        corner_pt = Eigen::Translation2d(pivot_pt) * farthest_pt;
-//        corner_pt = Eigen::Rotation2D<double>(theta) * corner_pt;
-        ROS_ERROR("%f  %f    %f  %f  %f        %f  %f ", table_out.depth, table_out.width, alpha, beta, theta,
-                  corner_pt.x(), corner_pt.y());
-      }
-    */
+      // reconstruct convex hull
       pcl::PointCloud<pcl::PointXYZRGB> cloud_hull;
       pcl::ConvexHull<pcl::PointXYZRGB> convex_hull;
       convex_hull.setInputCloud(projected_cluster);
-      ros::WallTime t0 = ros::WallTime::now();
       convex_hull.reconstruct(cloud_hull);
-  //    printf("convex_hull %f\n", (ros::WallTime::now() - t0).toSec());
-      t0 = ros::WallTime::now();
 
       if (cloud_hull.size() < 4)
       {
@@ -1394,19 +1273,6 @@ ros::WallTime t0 = ros::WallTime::now();
                   cloud_hull.size());
         return false;
       }
-/*
-      auto min_x_pt = cloud_hull.end(), max_x_pt = cloud_hull.end();
-      auto min_y_pt = cloud_hull.end(), max_y_pt = cloud_hull.end();
-      for (auto it = cloud_hull.begin(); it != cloud_hull.end(); ++it)
-      {
-        if (min_x_pt == cloud_hull.end() || min_x_pt->x > it->x) min_x_pt = it;
-        if (max_x_pt == cloud_hull.end() || max_x_pt->x < it->x) max_x_pt = it;
-        if (min_y_pt == cloud_hull.end() || min_y_pt->y > it->y) min_y_pt = it;
-        if (max_y_pt == cloud_hull.end() || max_y_pt->y < it->y) max_y_pt = it;
-      }
-      printf("min max 1 %f\n", (ros::WallTime::now() - t0).toSec());
-*/
-
       hull_pc_pub_.publish(cloud_hull);
 
       // sort convex hull points by distance to the center; the most distant point will be the first corner; then
@@ -1424,36 +1290,20 @@ ros::WallTime t0 = ros::WallTime::now();
                    return pcl::squaredEuclideanDistance(a, center) > pcl::squaredEuclideanDistance(b, center);
                 });// TODO could do partial sort, but not clear up to which point
 
-/*
-      ROS_ERROR_STREAM("center "  <<  center);
-      for (auto& p : hull_sorted_points)
-      {
-
-        hull_marker_pub_.publish(createMarker(p));
-        ros::spinOnce();
-        ROS_ERROR_STREAM(" " <<  pcl::euclideanDistance(p, center) <<"\t" <<  p);
-//        ros::Duration(2).sleep();
-      }
-*/
       double min_surface_side_ = 0.3;
       double min_surface_side_sq = std::pow(min_surface_side_, 2);
       std::vector<pcl::PointXYZRGB> corners = {hull_sorted_points.front()};
+      ROS_DEBUG_STREAM("corner " << corners.size() << "  " << hull_sorted_points.front());
       auto it = hull_sorted_points.begin() + 1;
-//      ROS_ERROR_STREAM("corner " << corners.size() << "  " << hull_sorted_points.front());
       while (corners.size() < 4 && it != hull_sorted_points.end())
       {
-//        hull_marker_pub_.publish(createMarker(*it));
-//        ros::spinOnce();
-
         if (std::all_of(corners.begin(), corners.end(),
                         [&](const pcl::PointXYZRGB& c) {
                   return pcl::squaredEuclideanDistance(*it, c) >= min_surface_side_sq; }))
         {
           corners.push_back(*it);
-//        ROS_ERROR_STREAM("corner " << corners.size() << "  " << *it);
-//          ros::Duration(2).sleep();
+          ROS_DEBUG_STREAM("corner " << corners.size() << "  " << *it);
         }
-//        ros::Duration(2).sleep();
         ++it;
       }
       if (corners.size() < 4)
@@ -1461,45 +1311,11 @@ ros::WallTime t0 = ros::WallTime::now();
         ROS_ERROR("Discarding surface for not reaching the minimum side (%g meters)", min_surface_side_);
         return false;
       }
-      // finally we sort them by x coordinate: max, 2nd, min, 3th and create 4 edges connecting them (we don't care
-      // about the polygon circling order, as all further computations will depend only on the edges length)
-      // finally we sort corners clock-wise (just a convention)
+
+      // sort corners circling the center (the order doesn't matter, I use clock-wise just as convention)
       sortCornersCW(center, corners);
-//      std::sort(corners.begin(), corners.end(),
-//                [](const pcl::PointXYZRGB& a, const pcl::PointXYZRGB& b) { return a.x > b.x; });
-//      std::swap(corners[2], corners[3]);
-      //
-//      t0 = ros::WallTime::now();
-//      auto x_sorted = cloud_hull.points;
-//      auto y_sorted = cloud_hull.points;
-//      std::sort(x_sorted.begin(), x_sorted.end(),
-//                [](const pcl::PointXYZRGB& a, const pcl::PointXYZRGB& b) { return a.x < b.x; });
-//      std::sort(y_sorted.begin(), y_sorted.end(),
-//                [](const pcl::PointXYZRGB& a, const pcl::PointXYZRGB& b) { return a.y < b.y; });
-//      double corners_tolerance = 0.025;
-//      auto min_x_pt = x_sorted.begin(), max_x_pt = x_sorted.end() - 1;
-//      auto min_y_pt = y_sorted.begin(), max_y_pt = y_sorted.end() - 1;
-//      double min_x = min_x_pt->x, max_x = max_x_pt->x;
-//      double min_y = min_y_pt->y, max_y = max_y_pt->y;
-//
-//      for (auto it = std::next(min_x_pt); it->x - min_x < corners_tolerance; ++it)
-//        if (it->y < min_x_pt->y)
-//          min_x_pt = it;
-//      for (auto it = std::prev(max_x_pt); max_x - it->x < corners_tolerance; --it)
-//        if (it->y > max_x_pt->y)
-//          max_x_pt = it;
-//      for (auto it = std::next(min_y_pt); it->y - min_y < corners_tolerance; ++it)
-//        if (it->x > min_y_pt->x)
-//          min_y_pt = it;
-//      for (auto it = std::prev(max_y_pt); max_y - it->y < corners_tolerance; --it)
-//        if (it->x < max_y_pt->x)
-//          max_y_pt = it;
-//      while (max_x - std::prev(max_x_pt)->x < corners_tolerance && std::prev(max_x_pt)->y > max_x_pt->y) --max_x_pt;
-//      while (std::next(min_y_pt)->y - min_y < corners_tolerance && std::next(min_y_pt)->x > min_x_pt->x) ++min_y_pt;
-//      while (max_y - std::prev(max_y_pt)->y < corners_tolerance && std::prev(max_y_pt)->x < max_x_pt->x) --max_y_pt;
 
-//      printf("min max 2 %f\n", (ros::WallTime::now() - t0).toSec());
-
+      // create edges linking the corners and sort by length
       typedef std::tuple<double, pcl::PointXYZRGB, pcl::PointXYZRGB> HullEdge;
       std::vector<HullEdge> edges{std::make_tuple(pcl::euclideanDistance(corners[0], corners[1]), corners[0], corners[1]),
                                   std::make_tuple(pcl::euclideanDistance(corners[1], corners[2]), corners[1], corners[2]),
@@ -1515,70 +1331,21 @@ ros::WallTime t0 = ros::WallTime::now();
       table_out.depth = std::get<0>(edges[0]);  // we equal depth to length, i.e. the longest side
       table_out.width = std::get<0>(edges[2]);  // use the third longest side as width
 
-//  fail, creo,,,  no tiene mucho sentido
-//      std::partial_sort(edges.begin(), edges.begin() + 2, edges.end(),
-//                        [](const HullEdge & a, const HullEdge & b) { return std::get<0>(a) > std::get<0>(b); });
-//      // We use the longest convex hull dimension to calculate the orientation, so it gets aligned to x axis
-//      auto pt1 = std::get<1>(*edges.begin());
-//      auto pt2 = std::get<2>(*edges.begin());
-//      double theta = std::atan2(pt2->y - pt1->y, pt2->x - pt1->x);
-//      table_out.orientation = tf::createQuaternionMsgFromYaw(theta);
-//      table_out.depth = std::max(std::get<0>(edges[0]), std::get<0>(edges[1]));
-//      table_out.width = std::max(std::get<0>(edges[2]), std::get<0>(edges[3]));
-
-//      table_out.depth = std::max(pcl::euclideanDistance(*min_x_pt, *min_y_pt),
-//                                 pcl::euclideanDistance(*max_x_pt, *max_y_pt));
-//      table_out.width = std::max(pcl::euclideanDistance(*min_x_pt, *max_y_pt),
-//                                 pcl::euclideanDistance(*max_x_pt, *min_y_pt));
+      // Publish table pose
       geometry_msgs::PoseStamped table_pose;
       table_pose.header.frame_id = zone.getSegmentationFrameID();
       table_pose.pose.position = table_out.center;
       table_pose.pose.orientation = table_out.orientation;
-//      table_pose.pose.position.x = bbox_tf.x();
-//      table_pose.pose.position.y = bbox_tf.y();
-//      table_pose.pose.position.z = bbox_tf.z();
-//      table_pose.pose.orientation.x = bbox_q.x();
-//      table_pose.pose.orientation.y = bbox_q.y();
-//      table_pose.pose.orientation.z = bbox_q.z();
-//      table_pose.pose.orientation.w = bbox_q.w();
-//      table_pose.pose.orientation = tf::createQuaternionMsgFromYaw(theta);
       table_pose_pub_.publish(table_pose);
 
       // visualize convex hull center and corners
       corners.push_back(center);
       /////TODO corners.push_back(table_out.center); show which one is better,,, plot diff colors   then use to recenter the corners convex hull
       hull_marker_pub_.publish(createMarker(table_pose, corners));
+// TODO:  refactoring pub here when I drop attributes
 //      table_marker_pub_.publish(createMarker(table_pose, center_pt, farthest_pt));
 //      table_marker_pub_.publish(createMarker(zone.getSegmentationFrameID(), bbox_tf, bbox_q, minPoint, maxPoint));
 //      table_marker_pub_.publish(createMarker(table_pose, minPoint, maxPoint));
-      // This viewer has 4 windows, but is only showing images in one of them as written here.
-//      pcl::visualization::PCLVisualizer *visu;
-//      visu = new pcl::visualization::PCLVisualizer("PlyViewer");
-//      int mesh_vp_1, mesh_vp_2, mesh_vp_3, mesh_vp_4;
-//      visu->createViewPort (0.0, 0.5, 0.5, 1.0,  mesh_vp_1);
-//      visu->createViewPort (0.5, 0.5, 1.0, 1.0,  mesh_vp_2);
-//      visu->createViewPort (0.0, 0, 0.5, 0.5,  mesh_vp_3);
-//      visu->createViewPort (0.5, 0, 1.0, 0.5, mesh_vp_4);
-//      visu->addPointCloud(projected_cluster, "bboxedCloud", mesh_vp_3);
-//      visu->addCube(bbox_tf, bbox_q, maxPoint.x - minPoint.x, maxPoint.y - minPoint.y, maxPoint.z - minPoint.z, "bbox", mesh_vp_3);
-      ///visu->addCube(projected_centroid, bbox_q, 0.1, 0.1, 0.1, "centroid", mesh_vp_3);
-
-      //convert orientation to a single angle on the 2D plane defined by the segmentation coordinate frame
-//      tf::Quaternion tf_quat;
-//      tf_quat.setValue(bbox_q.x(), bbox_q.y(), bbox_q.z(), bbox_q.w());
-//      double r, p, y;
-//      tf::Matrix3x3 m(tf_quat);
-//      m.getRPY(r, p, y);
-//      double angle = r + y;
-//      while (angle < -M_PI)
-//      {
-//        angle += 2 * M_PI;
-//      }
-//      while (angle > M_PI)
-//      {
-//        angle -= 2 * M_PI;
-//      }
-//      table_out.orientation = tf::createQuaternionMsgFromYaw(angle);
 
       printf("%f\n", (ros::WallTime::now() - t0).toSec());
       return true;
@@ -1763,60 +1530,6 @@ visualization_msgs::Marker Segmenter::createMarker(const pcl::PCLPointCloud2::Co
 
   return marker;
 }
-
-visualization_msgs::Marker Segmenter::createMarker(const geometry_msgs::PoseStamped& table_pose,
-                                                   const pcl::PointXYZRGB& min_x, const pcl::PointXYZRGB& max_x,
-                                                   const pcl::PointXYZRGB& min_y, const pcl::PointXYZRGB& max_y) const
-{
-  visualization_msgs::Marker marker;
-  // set header field
-  marker.header.frame_id = table_pose.header.frame_id;
-  marker.ns = "convex_hull_corners";
-
-  // default position
-//  marker.pose.position.x = bbox_tf.x();
-//  marker.pose.position.y = bbox_tf.y();
-//  marker.pose.position.z = bbox_tf.z();
-//  marker.pose.orientation.x = bbox_q.x();
-//  marker.pose.orientation.y = bbox_q.y();
-//  marker.pose.orientation.z = bbox_q.z();
-//  marker.pose.orientation.w = bbox_q.w();
-//  marker.pose = table_pose.pose;
-  marker.type = visualization_msgs::Marker::POINTS;
-
-  // default scale
-  marker.scale.x = 0.05;
-  marker.scale.y = 0.05;
-  marker.scale.z = 0.05;
-
-  marker.colors.resize(4);
-  marker.colors[0].r = 1.0;
-  marker.colors[0].a = 0.2;
-  marker.colors[1].r = 1.0;
-  marker.colors[1].g = 1.0;
-  marker.colors[1].a = 0.2;
-  marker.colors[2].g = 1.0;
-  marker.colors[2].a = 0.2;
-  marker.colors[3].b = 1.0;
-  marker.colors[3].a = 0.2;
-
-  marker.points.resize(4);
-  marker.points[0].x = max_x.x;
-  marker.points[0].y = max_x.y;
-  marker.points[0].z = max_x.z;
-  marker.points[1].x = min_x.x;
-  marker.points[1].y = min_x.y;
-  marker.points[1].z = min_x.z;
-  marker.points[2].x = max_y.x;
-  marker.points[2].y = max_y.y;
-  marker.points[2].z = max_y.z;
-  marker.points[3].x = min_y.x;
-  marker.points[3].y = min_y.y;
-  marker.points[3].z = min_y.z;
-
-  return marker;
-}
-
 
 visualization_msgs::Marker Segmenter::createMarker(const geometry_msgs::PoseStamped& table_pose,
                                                    const std::vector<pcl::PointXYZRGB>& points) const

@@ -338,9 +338,6 @@ private:
      */
     visualization_msgs::Marker createMarker(const pcl::PCLPointCloud2::ConstPtr &pc) const;
 
-  visualization_msgs::Marker createMarker(const geometry_msgs::PoseStamped& table_pose,
-                                                     const pcl::PointXYZRGB& min_x, const pcl::PointXYZRGB& max_x,
-                                                     const pcl::PointXYZRGB& min_y, const pcl::PointXYZRGB& max_y) const;
         visualization_msgs::Marker createMarker(const pcl::PointXYZRGB& max_pt) const;
 
   visualization_msgs::Marker createMarker(const geometry_msgs::PoseStamped& table_pose,
