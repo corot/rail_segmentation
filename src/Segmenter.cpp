@@ -1213,14 +1213,22 @@ ros::WallTime t0 = ros::WallTime::now();
       // calculate the bounding box
       Eigen::Vector4f min_pt, max_pt;
       pcl::getMinMax3D(*plane, min_pt, max_pt);
-      table_out.width = max_pt[0] - min_pt[0];
-      table_out.depth = max_pt[1] - min_pt[1];
+      table_out.depth = max_pt[0] - min_pt[0];
+      table_out.width = max_pt[1] - min_pt[1];
       table_out.height = max_pt[2] - min_pt[2];
 
       // calculate the center
       table_out.center.x = (max_pt[0] + min_pt[0]) / 2.0;
       table_out.center.y = (max_pt[1] + min_pt[1]) / 2.0;
       table_out.center.z = (max_pt[2] + min_pt[2]) / 2.0;
+
+      // same information provided as the minimum volume bounding box
+      table_out.bounding_volume.dimensions.x = table_out.depth;
+      table_out.bounding_volume.dimensions.y = table_out.width;
+      table_out.bounding_volume.dimensions.z = table_out.height;
+      table_out.bounding_volume.pose.header.frame_id = zone.getSegmentationFrameID();
+      table_out.bounding_volume.pose.pose.position = table_out.center;
+      table_out.bounding_volume.pose.pose.orientation.w = 1.0;
 
       // calculate color features
       Eigen::Vector3f rgb, lab;
