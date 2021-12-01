@@ -57,7 +57,7 @@ Segmenter::Segmenter() : private_node_("~"), tf2_(tf_buffer_)
   segment_srv_ = private_node_.advertiseService("segment", &Segmenter::segmentCallback, this);
   segment_objects_srv_ = private_node_.advertiseService("segment_objects", &Segmenter::segmentObjectsCallback, this);
   segment_objects_from_point_cloud_srv_ = private_node_.advertiseService("segment_objects_from_point_cloud", &Segmenter::segmentObjectsFromPointCloudCallback, this);
-  clear_srv_ = private_node_.advertiseService("clear", &Segmenter::clearCallback, this);
+  clear_srv_ = private_node_.advertiseService("clear_markers", &Segmenter::clearCallback, this);
   remove_object_srv_ = private_node_.advertiseService("remove_object", &Segmenter::removeObjectCallback, this);
   calculate_features_srv_ = private_node_.advertiseService("calculate_features", &Segmenter::calculateFeaturesCallback,
                                                            this);
