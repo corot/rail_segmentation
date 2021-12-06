@@ -50,6 +50,7 @@
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl/segmentation/extract_clusters.h>
+#include <pcl/segmentation/region_growing.h>
 #include <pcl/segmentation/region_growing_rgb.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/sample_consensus/sac_model_normal_plane.h>
@@ -156,6 +157,8 @@ public:
     bool okay() const;
 
 private:
+    void pointCloudCallback(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_msg);
+
     /*!
      * \brief Determine the current zone based on the latest state of the TF tree.
      *
@@ -246,7 +249,7 @@ private:
      * @param pc input point cloud to be segmented
      * @return true on success, to be passed to service return
      */
-    bool executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc,
+    bool executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr pc,
         rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface = false);
 
     /*!
@@ -375,9 +378,9 @@ private:
     ros::ServiceServer segment_srv_, segment_objects_srv_, segment_objects_from_point_cloud_srv_, clear_srv_, remove_object_srv_, calculate_features_srv_;
     /*! Publishers used in the node. */
     ros::Publisher segmented_objects_pub_, table_pub_, table_pose_pub_, markers_pub_, table_marker_pub_, hull_marker_pub_, zone_pc_pub_,
-        surface_pub_, b_cluster_pub_, projected_pub_, hull_pc_pub_, debug_img_pub_;
+        surface_pub_, projected_pub_, hull_pc_pub_, debug_img_pub_, segmented_pub_;
     /*! Subscribers used in the node. */
-//  ros::Subscriber point_cloud_sub_;
+    ros::Subscriber point_cloud_sub_;
     /*! Main transform listener. */
     tf::TransformListener tf_;
     /*! The transform tree buffer for the tf2 listener. */
@@ -385,6 +388,7 @@ private:
     /*! The buffered trasnform client. */
     tf2_ros::TransformListener tf2_;
 
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_msg_ = nullptr;
     std::string point_cloud_topic_;
 
     /*! Current object list. */
