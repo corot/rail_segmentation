@@ -35,7 +35,8 @@ const bool Segmenter::DEFAULT_DEBUG;
 
 Segmenter::Segmenter() : private_node_("~"), tf2_(tf_buffer_)
 {
-  // flag for using the provided point cloud
+  // silence PCL log error messages, as we expect many segmentation failures
+  pcl::console::setVerbosityLevel(pcl::console::L_ALWAYS);
 
   // set defaults
   string point_cloud_topic("/head_camera/depth_registered/points");
@@ -982,7 +983,7 @@ bool Segmenter::calculateFeaturesCallback(rail_manipulation_msgs::ProcessSegment
 }
 
 
-bool sortCornersCW(const pcl::PointXYZRGB& center, std::vector<pcl::PointXYZRGB>& corners)
+void sortCornersCW(const pcl::PointXYZRGB& center, std::vector<pcl::PointXYZRGB>& corners)
 {
   std::sort(corners.begin(), corners.end(),
             [&](const pcl::PointXYZRGB& a, const pcl::PointXYZRGB& b) {
@@ -1267,8 +1268,7 @@ void Segmenter::extractClustersEuclidean(const pcl::PointCloud<pcl::PointXYZRGB>
   pcl::IndicesPtr valid(new vector<int>);
   for (size_t i = 0; i < indices_in->size(); i++)
   {
-    if (pcl_isfinite(in->points[indices_in->at(i)].x) & pcl_isfinite(in->points[indices_in->at(i)].y) &
-      pcl_isfinite(in->points[indices_in->at(i)].z))
+    if (pcl::isFinite(in->points[indices_in->at(i)]))
     {
       valid->push_back(indices_in->at(i));
     }
@@ -1293,8 +1293,7 @@ void Segmenter::extractClustersRGB(const pcl::PointCloud<pcl::PointXYZRGB>::Cons
   pcl::IndicesPtr valid(new vector<int>);
   for (size_t i = 0; i < indices_in->size(); i++)
   {
-    if (pcl_isfinite(in->points[indices_in->at(i)].x) & pcl_isfinite(in->points[indices_in->at(i)].y) &
-      pcl_isfinite(in->points[indices_in->at(i)].z))
+    if (pcl::isFinite(in->points[indices_in->at(i)]))
     {
       valid->push_back(indices_in->at(i));
     }
