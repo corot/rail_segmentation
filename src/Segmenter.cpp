@@ -625,6 +625,10 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
   // publish the new marker array
   table_marker_pub_.publish(table_marker_);
 
+  // create the new list
+  objects.header.stamp = ros::Time::now();
+  objects.header.frame_id = zone.getSegmentationFrameID();
+  objects.cleared = false;
   objects.objects.push_back(table_);
 
   if (only_surface)
@@ -824,12 +828,6 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
       }
       //ROS_ERROR("%d done", omp_get_thread_num());
     }
-
-    // create the new list
-    objects.header.seq++;
-    objects.header.stamp = ros::Time::now();
-    objects.header.frame_id = zone.getSegmentationFrameID();
-    objects.cleared = false;
 
     // update the new list and publish it
     object_list_ = objects;
