@@ -24,9 +24,11 @@
 #include <rail_manipulation_msgs/SegmentedObjectList.h>
 #include <rail_manipulation_msgs/SegmentObjects.h>
 #include <rail_manipulation_msgs/SegmentObjectsFromPointCloud.h>
+#include <rail_manipulation_msgs/SegmentObjectsAction.h>
 #include <rail_segmentation/RemoveObject.h>
 #include <ros/package.h>
 #include <ros/ros.h>
+#include <actionlib/server/simple_action_server.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -223,6 +225,15 @@ private:
     bool segmentObjectsCallback(rail_manipulation_msgs::SegmentObjects::Request &req, rail_manipulation_msgs::SegmentObjects::Response &res);
 
     /*!
+     * \brief Callback for the segmentation action server.
+     *
+     * Does exactly the same as the homonym service.
+     *
+     * \param goal Pointer to the SegmentObjects action goal.
+     */
+    void segmentObjectsCallback(const rail_manipulation_msgs::SegmentObjectsGoalConstPtr &goal);
+
+    /*!
     * \brief Callback for the main segmentation request.
     *
     * Performs a segmenation with the provided point cloud. This will publish both a segmented object list and a marker
@@ -374,6 +385,8 @@ private:
 
     /*! The global and private ROS node handles. */
     ros::NodeHandle node_, private_node_;
+    /*! Action servers provided by this node */
+    actionlib::SimpleActionServer<rail_manipulation_msgs::SegmentObjectsAction> segment_objects_as_;
     /*! Services advertised by this node */
     ros::ServiceServer segment_srv_, segment_objects_srv_, segment_objects_from_point_cloud_srv_, clear_srv_, remove_object_srv_, calculate_features_srv_;
     /*! Publishers used in the node. */

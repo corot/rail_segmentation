@@ -33,8 +33,11 @@ const bool Segmenter::DEFAULT_DEBUG;
   const double Segmenter::CLUSTER_TOLERANCE;
 #endif
 
-Segmenter::Segmenter() : private_node_("~"), tf2_(tf_buffer_)
-{
+Segmenter::Segmenter()
+    : private_node_("~"), tf2_(tf_buffer_),
+      segment_objects_as_(
+          private_node_, "segment_objects",
+          boost::bind(&Segmenter::segmentObjectsCallback, this, _1), false) {
   // silence PCL log error messages, as we expect many segmentation failures
   pcl::console::setVerbosityLevel(pcl::console::L_ALWAYS);
 
@@ -273,6 +276,7 @@ Segmenter::Segmenter() : private_node_("~"), tf2_(tf_buffer_)
   // check how many zones we have
   if (zones_.size() > 0)
   {
+    segment_objects_as_.start();
     ROS_INFO("%d segmentation zone(s) parsed.", (int) zones_.size());
     ROS_INFO("Segmenter Successfully Initialized");
     okay_ = true;
@@ -424,6 +428,19 @@ bool Segmenter::segmentObjectsCallback(rail_manipulation_msgs::SegmentObjects::R
                                        rail_manipulation_msgs::SegmentObjects::Response &res)
 {
   return segmentObjects(res.segmented_objects, req.only_surface);
+}
+
+void Segmenter::segmentObjectsCallback(const rail_manipulation_msgs::SegmentObjectsGoalConstPtr &goal)
+{
+  rail_manipulation_msgs::SegmentObjectsResult result;
+  if (segmentObjects(result.segmented_objects, goal->only_surface))
+  {
+    segment_objects_as_.setSucceeded(result);
+  }
+  else
+  {
+    segment_objects_as_.setAborted(result);
+  }
 }
 
 bool Segmenter::segmentObjectsFromPointCloudCallback(rail_manipulation_msgs::SegmentObjectsFromPointCloud::Request &req,
