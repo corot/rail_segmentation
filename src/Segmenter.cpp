@@ -433,7 +433,7 @@ bool Segmenter::segmentObjectsCallback(rail_manipulation_msgs::SegmentObjects::R
 void Segmenter::segmentObjectsCallback(const rail_manipulation_msgs::SegmentObjectsGoalConstPtr &goal)
 {
   rail_manipulation_msgs::SegmentObjectsResult result;
-  if (segmentObjects(result.segmented_objects, goal->only_surface))
+  if (segmentObjects(result.segmented_objects, goal->only_surface, goal->surface_min_side))
   {
     segment_objects_as_.setSucceeded(result);
   }
@@ -454,7 +454,7 @@ bool Segmenter::segmentObjectsFromPointCloudCallback(rail_manipulation_msgs::Seg
   return executeSegmentation(pc, res.segmented_objects);
 }
 
-bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface)
+bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface, double surface_min_side)
 {
   // get the latest point cloud
   pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr pc_msg =
@@ -464,11 +464,11 @@ bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &obje
     ROS_WARN("No point cloud received for segmentation.");
     return false;
   }
-  return executeSegmentation(pc_msg, objects, only_surface);
+  return executeSegmentation(pc_msg, objects, only_surface, surface_min_side);
 }
 
 bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr pc,
-                                    rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface)
+                                    rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface, double surface_min_side)
 {
   // determine the correct segmentation zone
   const SegmentationZone &zone = this->getCurrentZone();
@@ -497,7 +497,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
   {
     if (zone.getRemoveSurface())
     {
-      bool surface_found = this->findSurface(transformed_pc, filter_indices, zone, filter_indices, only_surface, table_);
+      bool surface_found = this->findSurface(transformed_pc, filter_indices, zone, filter_indices, only_surface, surface_min_side, table_);
       if (zone.getRequireSurface() && !surface_found)
       {
         objects.objects.clear();
@@ -569,7 +569,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
                  transformed_pc->size(), min_surface_size_);
         return true;
       }
-      bool surface_found = this->findSurface(transformed_pc, filter_indices, zone, filter_indices, only_surface, table_);
+      bool surface_found = this->findSurface(transformed_pc, filter_indices, zone, filter_indices, only_surface, surface_min_side, table_);
       if (zone.getRequireSurface() && !surface_found)
       {
         objects.objects.clear();
@@ -1011,7 +1011,7 @@ void sortCornersCW(const pcl::PointXYZRGB& center, std::vector<pcl::PointXYZRGB>
 
 bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
                             const pcl::IndicesConstPtr &indices_in, const SegmentationZone &zone, const pcl::IndicesPtr &indices_out,
-                            bool check_contiguous, rail_manipulation_msgs::SegmentedObject &table_out) const
+                            bool check_contiguous, double min_surface_side, rail_manipulation_msgs::SegmentedObject &table_out) const
 {
   pcl::NormalEstimationOMP<pcl::PointXYZRGB, pcl::Normal> norm_est;
   pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
@@ -1220,8 +1220,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
                    return pcl::squaredEuclideanDistance(a, center) > pcl::squaredEuclideanDistance(b, center);
                 });// TODO could do partial sort, but not clear up to which point
 
-      double min_surface_side_ = 0.3;
-      double min_surface_side_sq = std::pow(min_surface_side_, 2);
+      double min_surface_side_sq = std::pow(min_surface_side, 2);
       std::vector<pcl::PointXYZRGB> corners = {hull_sorted_points.front()};
       ROS_DEBUG_STREAM("corner " << corners.size() << "  " << hull_sorted_points.front());
       auto it = hull_sorted_points.begin() + 1;
@@ -1238,7 +1237,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       }
       if (corners.size() < 4)
       {
-        ROS_ERROR("Discarding surface for not reaching the minimum side (%g meters)", min_surface_side_);
+        ROS_ERROR("Discarding surface for not reaching the minimum side (%g meters)", min_surface_side);
         return false;
       }
 

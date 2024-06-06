@@ -248,12 +248,13 @@ private:
     /*!
     * \brief Callback for the main segmentation request.
     *
-    * Performs a segmenation with the latest point cloud. This will publish both a segmented object list and a marker
+    * Performs a segmentation with the latest point cloud. This will publish both a segmented object list and a marker
     * array of the resulting segmentation.
     *
     * \param objects List for resulting segmented objects.
     */
-    bool segmentObjects(rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface = false);
+    bool segmentObjects(rail_manipulation_msgs::SegmentedObjectList &objects,
+                        bool only_surface = false, double surface_min_side = 0.15);
 
     /*!
      * \brief Main segmentation routine.
@@ -261,7 +262,8 @@ private:
      * @return true on success, to be passed to service return
      */
     bool executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr pc,
-        rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface = false);
+                             rail_manipulation_msgs::SegmentedObjectList &objects,
+                             bool only_surface = false, double surface_min_side = 0.15);
 
     /*!
      * \brief Find and remove a surface from the given point cloud.
@@ -279,7 +281,7 @@ private:
      * \return true if a surface was found, false otherwise
      */
     bool findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
-        const SegmentationZone &zone, const pcl::IndicesPtr &indices_out, bool check_contiguous,
+        const SegmentationZone &zone, const pcl::IndicesPtr &indices_out, bool check_contiguous, double min_surface_side,
         rail_manipulation_msgs::SegmentedObject &table_out) const;
 
     /*!
