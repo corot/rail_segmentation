@@ -78,6 +78,8 @@ namespace rail
 namespace segmentation
 {
 
+typedef pcl::PointXYZRGB PointT;
+
 /*!
  * \class Segmenter
  * \brief The main grasp collector node object.
@@ -159,7 +161,7 @@ public:
     bool okay() const;
 
 private:
-    void pointCloudCallback(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_msg);
+    void pointCloudCallback(pcl::PointCloud<PointT>::Ptr pc_msg);
 
     /*!
      * \brief Determine the current zone based on the latest state of the TF tree.
@@ -261,7 +263,7 @@ private:
      * @param pc input point cloud to be segmented
      * @return true on success, to be passed to service return
      */
-    bool executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr pc,
+    bool executeSegmentation(pcl::PointCloud<PointT>::ConstPtr pc,
                              rail_manipulation_msgs::SegmentedObjectList &objects,
                              bool only_surface = false, double surface_min_side = 0.15);
 
@@ -280,7 +282,7 @@ private:
      * \param table_out the table as a segmented object, to be published on a separate topic
      * \return true if a surface was found, false otherwise
      */
-    bool findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
+    bool findSurface(const pcl::PointCloud<PointT>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
         const SegmentationZone &zone, const pcl::IndicesPtr &indices_out, bool check_contiguous, double min_surface_side,
         rail_manipulation_msgs::SegmentedObject &table_out) const;
 
@@ -293,7 +295,7 @@ private:
      * \param indices_in The indices in the point cloud to consider.
      * \param clusters The indices of each cluster in the point cloud.
      */
-    void extractClustersEuclidean(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
+    void extractClustersEuclidean(const pcl::PointCloud<PointT>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
         std::vector<pcl::PointIndices> &clusters) const;
 
 
@@ -306,7 +308,7 @@ private:
      * \param indices_in The indices in the point cloud to consider.
      * \param clusters The indices of each cluster in the point cloud.
      */
-    void extractClustersRGB(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
+    void extractClustersRGB(const pcl::PointCloud<PointT>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
         std::vector<pcl::PointIndices> &clusters) const;
 
     /*!
@@ -319,8 +321,8 @@ private:
      * \param conditions The conditions specifying which points to ignore.
      * \param indices_out The set of points that pass the condition test.
      */
-    void inverseBound(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
-        const pcl::ConditionBase<pcl::PointXYZRGB>::Ptr &conditions, const pcl::IndicesPtr &indices_out) const;
+    void inverseBound(const pcl::PointCloud<PointT>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
+        const pcl::ConditionBase<PointT>::Ptr &conditions, const pcl::IndicesPtr &indices_out) const;
 
     /*!
      * \brief Extract a new point cloud based on the given indices.
@@ -331,8 +333,8 @@ private:
      * \param indices_in The indices to create a new point cloud from.
      * \param out The point cloud to fill.
      */
-    void extract(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
-        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &out) const;
+    void extract(const pcl::PointCloud<PointT>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
+        const pcl::PointCloud<PointT>::Ptr &out) const;
 
     /*!
      * \brief Find the average Z value of the point vector.
@@ -342,7 +344,14 @@ private:
      * \param v The vector of points to average.
      * \return The average Z value of the provided points.
      */
-    double averageZ(const std::vector<pcl::PointXYZRGB, Eigen::aligned_allocator<pcl::PointXYZRGB> > &v) const;
+    double averageZ(const std::vector<PointT, Eigen::aligned_allocator<PointT> > &v) const;
+
+    /**
+     * Find the four vertices of a polygon that form a quadrilateral with the largest area.
+     * @param polygon Target polygon
+     * @return largest quadrilateral
+     */
+    std::vector<PointT> largestQuadrilateral(const std::vector<PointT>& polygon) const;
 
     /*!
      * \brief Create a Marker from the given point cloud.
@@ -354,10 +363,11 @@ private:
      */
     visualization_msgs::Marker createMarker(const pcl::PCLPointCloud2::ConstPtr &pc) const;
 
-        visualization_msgs::Marker createMarker(const pcl::PointXYZRGB& max_pt) const;
+    visualization_msgs::Marker createMarker(const PointT& max_pt) const;
 
-  visualization_msgs::Marker createMarker(const geometry_msgs::PoseStamped& table_pose,
-                                          const std::vector<pcl::PointXYZRGB>& points) const;
+    visualization_msgs::Marker createMarker(const geometry_msgs::PoseStamped& table_pose,
+                                            const std::vector<PointT>& points) const;
+
     /*!
      * \brief Create a cropped image of the segmented object.
      *
@@ -367,7 +377,7 @@ private:
      * \param cluster The indicies of the current cluster in the point cloud.
      * \return The corresponding image for the given cluster.
      */
-    sensor_msgs::Image createImage(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
+    sensor_msgs::Image createImage(const pcl::PointCloud<PointT>::ConstPtr &in,
         const pcl::PointIndices &cluster) const;
 
     /*! The debug, okay check, and color segmentation flags. */
@@ -403,7 +413,7 @@ private:
     /*! The buffered trasnform client. */
     tf2_ros::TransformListener tf2_;
 
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_msg_ = nullptr;
+    pcl::PointCloud<PointT>::Ptr pc_msg_ = nullptr;
     std::string point_cloud_topic_;
 
     /*! Current object list. */

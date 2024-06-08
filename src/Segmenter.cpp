@@ -78,11 +78,11 @@ Segmenter::Segmenter()
   // setup a debug publisher if we need it
   if (debug_)
   {
-    zone_pc_pub_ = private_node_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >("zone_pc", 1, true);
-    surface_pub_ = private_node_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >("surface", 1, true);
-    segmented_pub_ = private_node_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >("segmented", 1, true);
-    projected_pub_ = private_node_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >("projected", 1, true);
-    hull_pc_pub_ = private_node_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >("hull_pc", 1, true);
+    zone_pc_pub_ = private_node_.advertise<pcl::PointCloud<PointT> >("zone_pc", 1, true);
+    surface_pub_ = private_node_.advertise<pcl::PointCloud<PointT> >("surface", 1, true);
+    segmented_pub_ = private_node_.advertise<pcl::PointCloud<PointT> >("segmented", 1, true);
+    projected_pub_ = private_node_.advertise<pcl::PointCloud<PointT> >("projected", 1, true);
+    hull_pc_pub_ = private_node_.advertise<pcl::PointCloud<PointT> >("hull_pc", 1, true);
     debug_img_pub_ = private_node_.advertise<sensor_msgs::Image>("debug_img", 1, true);
   }
 
@@ -446,8 +446,8 @@ void Segmenter::segmentObjectsCallback(const rail_manipulation_msgs::SegmentObje
 bool Segmenter::segmentObjectsFromPointCloudCallback(rail_manipulation_msgs::SegmentObjectsFromPointCloud::Request &req,
                                                      rail_manipulation_msgs::SegmentObjectsFromPointCloud::Response &res)
 {
-  // convert pc from sensor_msgs::PointCloud2 to pcl::PointCloud<pcl::PointXYZRGB>
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc(new pcl::PointCloud<pcl::PointXYZRGB>);
+  // convert pc from sensor_msgs::PointCloud2 to pcl::PointCloud<PointT>
+  pcl::PointCloud<PointT>::Ptr pc(new pcl::PointCloud<PointT>);
 
   pcl::fromROSMsg(req.point_cloud, *pc);
 
@@ -457,8 +457,8 @@ bool Segmenter::segmentObjectsFromPointCloudCallback(rail_manipulation_msgs::Seg
 bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface, double surface_min_side)
 {
   // get the latest point cloud
-  pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr pc_msg =
-      ros::topic::waitForMessage<pcl::PointCloud<pcl::PointXYZRGB>>(point_cloud_topic_, node_, ros::Duration(1.0));
+  pcl::PointCloud<PointT>::ConstPtr pc_msg =
+      ros::topic::waitForMessage<pcl::PointCloud<PointT>>(point_cloud_topic_, node_, ros::Duration(1.0));
   if (!pc_msg)
   {
     ROS_WARN("No point cloud received for segmentation.");
@@ -467,7 +467,7 @@ bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &obje
   return executeSegmentation(pc_msg, objects, only_surface, surface_min_side);
 }
 
-bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr pc,
+bool Segmenter::executeSegmentation(pcl::PointCloud<PointT>::ConstPtr pc,
                                     rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface, double surface_min_side)
 {
   // determine the correct segmentation zone
@@ -475,11 +475,11 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
   ROS_INFO("Segmenting %s in zone '%s'.", only_surface ? "only surfaces" : "objects", zone.getName().c_str());
 
   // transform the point cloud to the fixed frame
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
+  pcl::PointCloud<PointT>::Ptr transformed_pc(new pcl::PointCloud<PointT>);
 
 
   std::vector<int> mapped;
-  pcl::removeNaNFromPointCloud<pcl::PointXYZRGB>(*pc, *transformed_pc, mapped);
+  pcl::removeNaNFromPointCloud<PointT>(*pc, *transformed_pc, mapped);
 
   pcl_ros::transformPointCloud(zone.getBoundingFrameID(), pcl_conversions::fromPCL(pc->header.stamp), *pc,
                                pc->header.frame_id, *transformed_pc, tf_);
@@ -511,41 +511,41 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
   }
 
   // check bounding areas (bound the inverse of what we want since PCL will return the removed indicies)
-  pcl::ConditionOr<pcl::PointXYZRGB>::Ptr bounds(new pcl::ConditionOr<pcl::PointXYZRGB>);
+  pcl::ConditionOr<PointT>::Ptr bounds(new pcl::ConditionOr<PointT>);
   if (z_min > -numeric_limits<double>::infinity())
   {
-    bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-      new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::LE, z_min))
+    bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+      new pcl::FieldComparison<PointT>("z", pcl::ComparisonOps::LE, z_min))
     );
   }
   if (zone.getZMax() < numeric_limits<double>::infinity())
   {
-    bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-      new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::GE, zone.getZMax()))
+    bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+      new pcl::FieldComparison<PointT>("z", pcl::ComparisonOps::GE, zone.getZMax()))
     );
   }
   if (zone.getYMin() > -numeric_limits<double>::infinity())
   {
-    bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-      new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::LE, zone.getYMin()))
+    bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+      new pcl::FieldComparison<PointT>("y", pcl::ComparisonOps::LE, zone.getYMin()))
     );
   }
   if (zone.getYMax() < numeric_limits<double>::infinity())
   {
-    bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-      new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::GE, zone.getYMax()))
+    bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+      new pcl::FieldComparison<PointT>("y", pcl::ComparisonOps::GE, zone.getYMax()))
     );
   }
   if (zone.getXMin() > -numeric_limits<double>::infinity())
   {
-    bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-      new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::LE, zone.getXMin()))
+    bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+      new pcl::FieldComparison<PointT>("x", pcl::ComparisonOps::LE, zone.getXMin()))
     );
   }
   if (zone.getXMax() < numeric_limits<double>::infinity())
   {
-    bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-      new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::GE, zone.getXMax()))
+    bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+      new pcl::FieldComparison<PointT>("x", pcl::ComparisonOps::GE, zone.getXMax()))
     );
   }
 
@@ -580,9 +580,9 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
       // check the new bound for Z
       z_min = max(zone.getZMin(), z_surface + SURFACE_REMOVAL_PADDING);
 
-      pcl::ConditionOr<pcl::PointXYZRGB>::Ptr table_bounds(new pcl::ConditionOr<pcl::PointXYZRGB>);
-      table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-        new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::LE, z_min))
+      pcl::ConditionOr<PointT>::Ptr table_bounds(new pcl::ConditionOr<PointT>);
+      table_bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+        new pcl::FieldComparison<PointT>("z", pcl::ComparisonOps::LE, z_min))
       );
 
       // plane segmentation does adds back in the filtered indices, so we need to re-add the old bounds (this should
@@ -590,32 +590,32 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
       // length of the point cloud's number of points)
       if (zone.getZMax() < numeric_limits<double>::infinity())
       {
-        table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-          new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::GE, zone.getZMax()))
+        table_bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+          new pcl::FieldComparison<PointT>("z", pcl::ComparisonOps::GE, zone.getZMax()))
         );
       }
       if (zone.getYMin() > -numeric_limits<double>::infinity())
       {
-        table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-          new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::LE, zone.getYMin()))
+        table_bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+          new pcl::FieldComparison<PointT>("y", pcl::ComparisonOps::LE, zone.getYMin()))
         );
       }
       if (zone.getYMax() < numeric_limits<double>::infinity())
       {
-        table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-          new pcl::FieldComparison<pcl::PointXYZRGB>("y", pcl::ComparisonOps::GE, zone.getYMax()))
+        table_bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+          new pcl::FieldComparison<PointT>("y", pcl::ComparisonOps::GE, zone.getYMax()))
         );
       }
       if (zone.getXMin() > -numeric_limits<double>::infinity())
       {
-        table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-          new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::LE, zone.getXMin()))
+        table_bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+          new pcl::FieldComparison<PointT>("x", pcl::ComparisonOps::LE, zone.getXMin()))
         );
       }
       if (zone.getXMax() < numeric_limits<double>::infinity())
       {
-        table_bounds->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
-          new pcl::FieldComparison<pcl::PointXYZRGB>("x", pcl::ComparisonOps::GE, zone.getXMax()))
+        table_bounds->addComparison(pcl::FieldComparison<PointT>::ConstPtr(
+          new pcl::FieldComparison<PointT>("x", pcl::ComparisonOps::GE, zone.getXMax()))
         );
       }
 
@@ -627,7 +627,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
   // publish the filtered and bounded PC pre-segmentation
   if (debug_)
   {
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
+    pcl::PointCloud<PointT>::Ptr debug_pc(new pcl::PointCloud<PointT>);
     this->extract(transformed_pc, filter_indices, debug_pc);
     segmented_pub_.publish(debug_pc);
   }
@@ -669,7 +669,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
       // Keep track of image indices of points in the cluster
       vector<int> cluster_indices;
       // grab the points we need
-      pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
+      pcl::PointCloud<PointT>::Ptr cluster(new pcl::PointCloud<PointT>);
       for (size_t j = 0; j < clusters[i].indices.size(); j++)
       {
         cluster->points.push_back(transformed_pc->points[clusters[i].indices[j]]);
@@ -681,7 +681,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
       cluster->header.frame_id = transformed_pc->header.frame_id;
 
       // check if we need to transform to a different frame
-      pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
+      pcl::PointCloud<PointT>::Ptr transformed_cluster(new pcl::PointCloud<PointT>);
       pcl::PCLPointCloud2::Ptr converted(new pcl::PCLPointCloud2);
       if (zone.getBoundingFrameID() != zone.getSegmentationFrameID())
       {
@@ -763,7 +763,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
       segmented_object.center.z = (max_pt[2] + min_pt[2]) / 2.0;
 
       // calculate the orientation
-      pcl::PointCloud<pcl::PointXYZRGB>::Ptr projected_cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
+      pcl::PointCloud<PointT>::Ptr projected_cluster(new pcl::PointCloud<PointT>);
       // project point cloud onto the xy plane
       pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients());
       coefficients->values.resize(4);
@@ -771,7 +771,7 @@ bool Segmenter::executeSegmentation(pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr 
       coefficients->values[1] = 0;
       coefficients->values[2] = 1.0;
       coefficients->values[3] = 0;
-      pcl::ProjectInliers<pcl::PointXYZRGB> proj;
+      pcl::ProjectInliers<PointT> proj;
       proj.setModelType(pcl::SACMODEL_PLANE);
       if (zone.getBoundingFrameID() != zone.getSegmentationFrameID())
       {
@@ -903,7 +903,7 @@ bool Segmenter::calculateFeaturesCallback(rail_manipulation_msgs::ProcessSegment
     res.segmented_objects.objects[i].point_cloud = req.segmented_objects.objects[i].point_cloud;
 
     // get point cloud as pcl point cloud
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcl_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+    pcl::PointCloud<PointT>::Ptr pcl_cloud(new pcl::PointCloud<PointT>);
     pcl::PCLPointCloud2::Ptr temp_cloud(new pcl::PCLPointCloud2);
     pcl_conversions::toPCL(res.segmented_objects.objects[i].point_cloud, *temp_cloud);
     pcl::fromPCLPointCloud2(*temp_cloud, *pcl_cloud);
@@ -951,7 +951,7 @@ bool Segmenter::calculateFeaturesCallback(rail_manipulation_msgs::ProcessSegment
     res.segmented_objects.objects[i].center.z = (max_pt[2] + min_pt[2]) / 2.0;
 
     // calculate the orientation
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr projected_cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
+    pcl::PointCloud<PointT>::Ptr projected_cluster(new pcl::PointCloud<PointT>);
     // project point cloud onto the xy plane
     pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients());
     coefficients->values.resize(4);
@@ -959,7 +959,7 @@ bool Segmenter::calculateFeaturesCallback(rail_manipulation_msgs::ProcessSegment
     coefficients->values[1] = 0;
     coefficients->values[2] = 1.0;
     coefficients->values[3] = 0;
-    pcl::ProjectInliers<pcl::PointXYZRGB> proj;
+    pcl::ProjectInliers<PointT> proj;
     proj.setModelType(pcl::SACMODEL_PLANE);
     proj.setInputCloud(pcl_cloud);
     proj.setModelCoefficients(coefficients);
@@ -998,10 +998,10 @@ bool Segmenter::calculateFeaturesCallback(rail_manipulation_msgs::ProcessSegment
 }
 
 
-void sortCornersCW(const pcl::PointXYZRGB& center, std::vector<pcl::PointXYZRGB>& corners)
+void sortCornersCW(const PointT& center, std::vector<PointT>& corners)
 {
   std::sort(corners.begin(), corners.end(),
-            [&](const pcl::PointXYZRGB& a, const pcl::PointXYZRGB& b) {
+            [&](const PointT& a, const PointT& b) {
                 double atan_a = std::atan2(a.y - center.y, a.x - center.x);
                 double atan_b = std::atan2(b.y - center.y, b.x - center.x);
                 return atan_a > atan_b;
@@ -1009,16 +1009,16 @@ void sortCornersCW(const pcl::PointXYZRGB& center, std::vector<pcl::PointXYZRGB>
 };
 
 
-bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
+bool Segmenter::findSurface(const pcl::PointCloud<PointT>::ConstPtr &in,
                             const pcl::IndicesConstPtr &indices_in, const SegmentationZone &zone, const pcl::IndicesPtr &indices_out,
                             bool check_contiguous, double min_surface_side, rail_manipulation_msgs::SegmentedObject &table_out) const
 {
-  pcl::NormalEstimationOMP<pcl::PointXYZRGB, pcl::Normal> norm_est;
-  pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
+  pcl::NormalEstimationOMP<PointT, pcl::Normal> norm_est;
+  pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>());
   norm_est.setSearchMethod(tree);
   norm_est.setKSearch(50);
 
-  pcl::SACSegmentationFromNormals<pcl::PointXYZRGB, pcl::Normal> plane_seg;
+  pcl::SACSegmentationFromNormals<PointT, pcl::Normal> plane_seg;
   plane_seg.setNormalDistanceWeight(0.1);
   plane_seg.setOptimizeCoefficients(false);  // not really needed, and avoids a horrible log error
   plane_seg.setModelType(pcl::SACMODEL_NORMAL_PARALLEL_PLANE);
@@ -1030,7 +1030,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
   plane_seg.setMaxIterations(SAC_MAX_ITERATIONS);
 
   // create a copy to work with
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_copy(new pcl::PointCloud<pcl::PointXYZRGB>(*in));
+  pcl::PointCloud<PointT>::Ptr pc_copy(new pcl::PointCloud<PointT>(*in));
   pcl::PointCloud<pcl::Normal>::Ptr pc_normals(new pcl::PointCloud<pcl::Normal>);
 
   norm_est.setInputCloud(pc_copy);
@@ -1058,8 +1058,8 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
     }
 
     // remove the plane
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr plane(new pcl::PointCloud<pcl::PointXYZRGB>);
-    pcl::ExtractIndices<pcl::PointXYZRGB> extract_segmented_plane(true);    // TODO can use extract method?  ojo con el tru y keep organized!!!
+    pcl::PointCloud<PointT>::Ptr plane(new pcl::PointCloud<PointT>);
+    pcl::ExtractIndices<PointT> extract_segmented_plane(true);    // TODO can use extract method?  ojo con el tru y keep organized!!!
     extract_segmented_plane.setInputCloud(pc_copy);
     extract_segmented_plane.setIndices(inliers_ptr);
     extract_segmented_plane.setNegative(false);
@@ -1078,7 +1078,7 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       *indices_out = *plane_seg.getIndices();
 
       // check if we need to transform to a different frame
-      pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
+      pcl::PointCloud<PointT>::Ptr transformed_pc(new pcl::PointCloud<PointT>);
       pcl::PCLPointCloud2::Ptr converted(new pcl::PCLPointCloud2);
       if (zone.getBoundingFrameID() != zone.getSegmentationFrameID())
       {
@@ -1167,14 +1167,14 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       // calculate the orientation
 
       // project point cloud onto the xy plane
-      pcl::PointCloud<pcl::PointXYZRGB>::Ptr projected_cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
+      pcl::PointCloud<PointT>::Ptr projected_cluster(new pcl::PointCloud<PointT>);
       pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients());
       coefficients->values.resize(4);
       coefficients->values[0] = 0;
       coefficients->values[1] = 0;
       coefficients->values[2] = 1.0;
       coefficients->values[3] = 0;
-      pcl::ProjectInliers<pcl::PointXYZRGB> proj;
+      pcl::ProjectInliers<PointT> proj;
       proj.setModelType(pcl::SACMODEL_PLANE);
       if (zone.getBoundingFrameID() != zone.getSegmentationFrameID())
       {
@@ -1190,8 +1190,8 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
         projected_pub_.publish(projected_cluster);
 
       // reconstruct convex hull
-      pcl::PointCloud<pcl::PointXYZRGB> cloud_hull;
-      pcl::ConvexHull<pcl::PointXYZRGB> convex_hull;
+      pcl::PointCloud<PointT> cloud_hull;
+      pcl::ConvexHull<PointT> convex_hull;
       convex_hull.setInputCloud(projected_cluster);
       convex_hull.reconstruct(cloud_hull);
 
@@ -1204,61 +1204,28 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       if (debug_)
         hull_pc_pub_.publish(cloud_hull);
 
-      // sort convex hull points by distance to the center; the most distant point will be the first corner; then
-      // we iterate over the remaining points, and whenever we jump beyond min surface side from all the corners
-      // detected so far, we add a new corner
-      // I got the idea from https://forum.dynamobim.com/t/sort-point-cloud-xyz-to-best-fit-lines/38999/3
-      Eigen::Vector4f center_pt;
-      pcl::compute3DCentroid(cloud_hull, center_pt);
-      pcl::PointXYZRGB center;
-      center.x = center_pt[0];
-      center.y = center_pt[1];
-      center.z = center_pt[2];
-      auto hull_sorted_points = cloud_hull.points;
-      std::sort(hull_sorted_points.begin(), hull_sorted_points.end(),
-                [&](const pcl::PointXYZRGB& a, const pcl::PointXYZRGB& b) {
-                   return pcl::squaredEuclideanDistance(a, center) > pcl::squaredEuclideanDistance(b, center);
-                });// TODO could do partial sort, but not clear up to which point
+      std::vector<PointT> corners = largestQuadrilateral({ cloud_hull.points.begin(), cloud_hull.points.end() });
 
-      double min_surface_side_sq = std::pow(min_surface_side, 2);
-      std::vector<pcl::PointXYZRGB> corners = {hull_sorted_points.front()};
-      ROS_DEBUG_STREAM("corner " << corners.size() << "  " << hull_sorted_points.front());
-      auto it = hull_sorted_points.begin() + 1;
-      while (corners.size() < 4 && it != hull_sorted_points.end())
-      {
-        if (std::all_of(corners.begin(), corners.end(),
-                        [&](const pcl::PointXYZRGB& c) {
-                  return pcl::squaredEuclideanDistance(*it, c) >= min_surface_side_sq; }))
-        {
-          corners.push_back(*it);
-          ROS_DEBUG_STREAM("corner " << corners.size() << "  " << *it);
-        }
-        ++it;
-      }
-      if (corners.size() < 4)
-      {
-        ROS_ERROR("Discarding surface for not reaching the minimum side (%g meters)", min_surface_side);
-        return false;
-      }
-
-      // sort corners circling the center (the order doesn't matter, I use clock-wise just as convention)
-      sortCornersCW(center, corners);
-
-      // create edges linking the corners and sort by length
-      typedef std::tuple<double, pcl::PointXYZRGB, pcl::PointXYZRGB> HullEdge;
+      // create edges linking the corners and sort by length; the shortest must be >= min_surface_side
+      typedef std::tuple<double, PointT, PointT> HullEdge;
       std::vector<HullEdge> edges{std::make_tuple(pcl::euclideanDistance(corners[0], corners[1]), corners[0], corners[1]),
                                   std::make_tuple(pcl::euclideanDistance(corners[1], corners[2]), corners[1], corners[2]),
                                   std::make_tuple(pcl::euclideanDistance(corners[2], corners[3]), corners[2], corners[3]),
                                   std::make_tuple(pcl::euclideanDistance(corners[3], corners[0]), corners[3], corners[0])};
       std::sort(edges.begin(), edges.end(),
                 [](const HullEdge& a, const HullEdge& b) { return std::get<0>(a) > std::get<0>(b); });
+      if (std::get<0>(edges.back()) < min_surface_side)
+      {
+        ROS_ERROR("Discarding surface for not reaching the minimum side (%g meters)", min_surface_side);
+        return false;
+      }
       // We use the longest convex hull dimension to calculate the orientation, so it gets aligned to x axis
       auto pt1 = std::get<1>(edges.front());
       auto pt2 = std::get<2>(edges.front());
       double theta = std::atan2(pt2.y - pt1.y, pt2.x - pt1.x);
       table_out.orientation = tf::createQuaternionMsgFromYaw(theta);
       table_out.depth = std::get<0>(edges[0]);  // we equal depth to length, i.e. the longest side
-      table_out.width = std::get<0>(edges[2]);  // use the third longest side as width
+      table_out.width = std::get<0>(edges[2]);  // use the third-longest side as width
 
       // Publish table pose
       geometry_msgs::PoseStamped table_pose;
@@ -1267,15 +1234,14 @@ bool Segmenter::findSurface(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &i
       table_pose.pose.orientation = table_out.orientation;
       table_pose_pub_.publish(table_pose);
 
-      // visualize convex hull center and corners
-      corners.push_back(center);
+      // visualize the four corners
       hull_marker_pub_.publish(createMarker(table_pose, corners));
       return true;
     }
   }
 }
 
-void Segmenter::extractClustersEuclidean(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
+void Segmenter::extractClustersEuclidean(const pcl::PointCloud<PointT>::ConstPtr &in,
                                          const pcl::IndicesConstPtr &indices_in, vector<pcl::PointIndices> &clusters) const
 {
   // ignore NaN and infinite values
@@ -1288,8 +1254,8 @@ void Segmenter::extractClustersEuclidean(const pcl::PointCloud<pcl::PointXYZRGB>
     }
   }
 
-  pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> seg;
-  pcl::search::KdTree<pcl::PointXYZRGB>::Ptr kd_tree(new pcl::search::KdTree<pcl::PointXYZRGB>);
+  pcl::EuclideanClusterExtraction<PointT> seg;
+  pcl::search::KdTree<PointT>::Ptr kd_tree(new pcl::search::KdTree<PointT>);
   kd_tree->setInputCloud(in);
   seg.setClusterTolerance(cluster_tolerance_);
   seg.setMinClusterSize(min_cluster_size_);
@@ -1300,7 +1266,7 @@ void Segmenter::extractClustersEuclidean(const pcl::PointCloud<pcl::PointXYZRGB>
   seg.extract(clusters);
 }
 
-void Segmenter::extractClustersRGB(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
+void Segmenter::extractClustersRGB(const pcl::PointCloud<PointT>::ConstPtr &in,
                                    const pcl::IndicesConstPtr &indices_in, vector<pcl::PointIndices> &clusters) const
 {
   // ignore NaN and infinite values
@@ -1312,8 +1278,8 @@ void Segmenter::extractClustersRGB(const pcl::PointCloud<pcl::PointXYZRGB>::Cons
       valid->push_back(indices_in->at(i));
     }
   }
-  pcl::RegionGrowingRGB<pcl::PointXYZRGB> seg;
-  pcl::search::KdTree<pcl::PointXYZRGB>::Ptr kd_tree(new pcl::search::KdTree<pcl::PointXYZRGB>);
+  pcl::RegionGrowingRGB<PointT> seg;
+  pcl::search::KdTree<PointT>::Ptr kd_tree(new pcl::search::KdTree<PointT>);
   kd_tree->setInputCloud(in);
   seg.setPointColorThreshold(POINT_COLOR_THRESHOLD);
   seg.setRegionColorThreshold(REGION_COLOR_THRESHOLD);
@@ -1326,7 +1292,7 @@ void Segmenter::extractClustersRGB(const pcl::PointCloud<pcl::PointXYZRGB>::Cons
   seg.extract(clusters);
 }
 
-sensor_msgs::Image Segmenter::createImage(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
+sensor_msgs::Image Segmenter::createImage(const pcl::PointCloud<PointT>::ConstPtr &in,
                                           const pcl::PointIndices &cluster) const
 {
   // determine the bounds of the cluster
@@ -1376,7 +1342,7 @@ sensor_msgs::Image Segmenter::createImage(const pcl::PointCloud<pcl::PointXYZRGB
     for (int w = 0; w < msg.width; w++)
     {
       // extract RGB information
-      const pcl::PointXYZRGB &point = in->at(col_min + w, row_min + h);
+      const PointT &point = in->at(col_min + w, row_min + h);
       // set RGB data
       int index = (msg.step * h) + (w * 3);
       msg.data[index] = point.b;
@@ -1452,44 +1418,44 @@ visualization_msgs::Marker Segmenter::createMarker(const pcl::PCLPointCloud2::Co
 }
 
 visualization_msgs::Marker Segmenter::createMarker(const geometry_msgs::PoseStamped& table_pose,
-                                                   const std::vector<pcl::PointXYZRGB>& points) const
+                                                   const std::vector<PointT>& points) const
 {
   visualization_msgs::Marker marker;
   // set header field
   marker.header.frame_id = table_pose.header.frame_id;
   marker.ns = "convex_hull_corners";
-
-  marker.type = visualization_msgs::Marker::POINTS;
+  marker.type = visualization_msgs::Marker::LINE_STRIP;
+  marker.pose.orientation.w = 1.0;  // normalize quaternion
 
   // default scale
-  marker.scale.x = 0.05;
-  marker.scale.y = 0.05;
-  marker.scale.z = 0.05;
+  marker.scale.x = 0.02;
 
   marker.colors.resize(points.size());
   marker.colors[0].r = 1.0;
-  marker.colors[1].r = 1.0;
   marker.colors[1].g = 1.0;
-  marker.colors[2].g = 1.0;
-  marker.colors[3].b = 1.0;
+  marker.colors[2].b = 1.0;
+  marker.colors[3].r = 1.0;
+  marker.colors[3].g = 1.0;
+  marker.colors.push_back(marker.colors.front());
 
   int i = 0;
   marker.points.resize(points.size());
-  for (auto& pt : points)
+  for (const auto& pt : points)
   {
     marker.points[i].x = pt.x;
     marker.points[i].y = pt.y;
-    marker.points[i].z = pt.z;
+    marker.points[i].z = table_pose.pose.position.z;
 
-    marker.colors[i].a = 0.2;
+    marker.colors[i].a = 0.5;
     ++i;
   }
+  marker.points.push_back(marker.points.front());
 
   return marker;
 }
 
 
-visualization_msgs::Marker Segmenter::createMarker(const pcl::PointXYZRGB& max_pt) const
+visualization_msgs::Marker Segmenter::createMarker(const PointT& max_pt) const
 {
   visualization_msgs::Marker marker;
   // set header field
@@ -1517,23 +1483,23 @@ visualization_msgs::Marker Segmenter::createMarker(const pcl::PointXYZRGB& max_p
   return marker;
 }
 
-void Segmenter::extract(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
-                        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &out) const
+void Segmenter::extract(const pcl::PointCloud<PointT>::ConstPtr &in, const pcl::IndicesConstPtr &indices_in,
+                        const pcl::PointCloud<PointT>::Ptr &out) const
 {
-  pcl::ExtractIndices<pcl::PointXYZRGB> extract;
+  pcl::ExtractIndices<PointT> extract;
   extract.setInputCloud(in);
   extract.setIndices(indices_in);
   extract.filter(*out);
 }
 
-void Segmenter::inverseBound(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &in,
+void Segmenter::inverseBound(const pcl::PointCloud<PointT>::ConstPtr &in,
                              const pcl::IndicesConstPtr &indices_in,
-                             const pcl::ConditionBase<pcl::PointXYZRGB>::Ptr &conditions,
+                             const pcl::ConditionBase<PointT>::Ptr &conditions,
                              const pcl::IndicesPtr &indices_out) const
 {
   // use a temp point cloud to extract the indices
-  pcl::PointCloud<pcl::PointXYZRGB> tmp;
-  pcl::ConditionalRemoval<pcl::PointXYZRGB> removal(true);
+  pcl::PointCloud<PointT> tmp;
+  pcl::ConditionalRemoval<PointT> removal(true);
   removal.setCondition(conditions);
   removal.setInputCloud(in);
   removal.setIndices(indices_in);
@@ -1541,7 +1507,7 @@ void Segmenter::inverseBound(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &
   *indices_out = *removal.getRemovedIndices();
 }
 
-double Segmenter::averageZ(const vector<pcl::PointXYZRGB, Eigen::aligned_allocator<pcl::PointXYZRGB> > &v) const
+double Segmenter::averageZ(const vector<PointT, Eigen::aligned_allocator<PointT> > &v) const
 {
   double avg = 0.0;
   for (size_t i = 0; i < v.size(); i++)
@@ -1549,6 +1515,35 @@ double Segmenter::averageZ(const vector<pcl::PointXYZRGB, Eigen::aligned_allocat
     avg += v[i].z;
   }
   return (avg / (double) v.size());
+}
+
+std::vector<PointT> Segmenter::largestQuadrilateral(const std::vector<PointT>& polygon) const
+{
+  auto calculate_area = [](const PointT& p1, const PointT& p2, const PointT& p3, const PointT& p4) -> double
+  {
+    // Calculate the area of the quadrilateral formed by four points using the Shoelace formula (Gauss's area formula)
+    return std::abs(p1.x * p2.y + p2.x * p3.y + p3.x * p4.y + p4.x * p1.y
+                    - p1.y * p2.x - p2.y * p3.x - p3.y * p4.x - p4.y * p1.x) / 2.0;
+  };
+
+  double max_area = 0;
+  std::vector<PointT> max_quadrilateral(4);
+
+  // Generate all combinations of four vertices
+  for (std::size_t i = 0; i < polygon.size(); ++i) {
+    for (std::size_t j = i + 1; j < polygon.size(); ++j) {
+      for (std::size_t k = j + 1; k < polygon.size(); ++k) {
+        for (std::size_t l = k + 1; l < polygon.size(); ++l) {
+          double area = calculate_area(polygon[i], polygon[j], polygon[k], polygon[l]);
+          if (area > max_area) {
+            max_area = area;
+            max_quadrilateral = { polygon[i], polygon[j], polygon[k], polygon[l] };
+          }
+        }
+      }
+    }
+  }
+  return max_quadrilateral;
 }
 
 //convert from RGB color space to CIELAB color space, adapted from pcl/registration/gicp6d
