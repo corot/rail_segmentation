@@ -54,10 +54,12 @@ Segmenter::Segmenter()
   private_node_.param("use_color", use_color_, false);
   private_node_.param("crop_first", crop_first_, false);
   private_node_.param("label_markers", label_markers_, false);
-  private_node_.param<string>("point_cloud_topic", point_cloud_topic_, "/head_camera/depth_registered/points");
+  private_node_.param<string>("point_cloud_topic", point_cloud_topic_, "camera/depth_registered/points");
   private_node_.getParam("zones_config", zones_file);
 
   // setup publishers/subscribers we need
+  point_cloud_sub_ = node_.subscribe(point_cloud_topic_, 1, &Segmenter::pointCloudCallback, this);
+
   segment_srv_ = private_node_.advertiseService("segment", &Segmenter::segmentCallback, this);
   segment_objects_srv_ = private_node_.advertiseService("segment_objects", &Segmenter::segmentObjectsCallback, this);
   segment_objects_from_point_cloud_srv_ = private_node_.advertiseService("segment_objects_from_point_cloud", &Segmenter::segmentObjectsFromPointCloudCallback, this);
@@ -292,6 +294,11 @@ bool Segmenter::okay() const
   return okay_;
 }
 
+void Segmenter::pointCloudCallback(pcl::PointCloud<PointT>::Ptr pc_msg)
+{
+  pc_msg_ = std::move(pc_msg);
+}
+
 const SegmentationZone &Segmenter::getCurrentZone() const
 {
   // check each zone
@@ -456,15 +463,12 @@ bool Segmenter::segmentObjectsFromPointCloudCallback(rail_manipulation_msgs::Seg
 
 bool Segmenter::segmentObjects(rail_manipulation_msgs::SegmentedObjectList &objects, bool only_surface, double surface_min_side)
 {
-  // get the latest point cloud
-  pcl::PointCloud<PointT>::ConstPtr pc_msg =
-      ros::topic::waitForMessage<pcl::PointCloud<PointT>>(point_cloud_topic_, node_, ros::Duration(1.0));
-  if (!pc_msg)
+  if (!pc_msg_)
   {
     ROS_WARN("No point cloud received for segmentation.");
     return false;
   }
-  return executeSegmentation(pc_msg, objects, only_surface, surface_min_side);
+  return executeSegmentation(pc_msg_, objects, only_surface, surface_min_side);
 }
 
 bool Segmenter::executeSegmentation(pcl::PointCloud<PointT>::ConstPtr pc,
